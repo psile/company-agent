@@ -176,12 +176,20 @@ def rerank_with_llm(items: list[dict[str, Any]], ctx: dict[str, Any], already: l
     return out
 
 
-def pick_push(items: list[dict[str, Any]], already: list[str], limit: int = 2) -> list[dict[str, Any]]:
+def pick_push(
+    items: list[dict[str, Any]],
+    already: list[str],
+    limit: int = 2,
+    threshold: int = 85,
+) -> list[dict[str, Any]]:
     picked = []
     for row in items:
         if row.get("id") in already:
             continue
-        if not row.get("recommend") and int(row.get("score") or 0) < 78:
+        score = int(row.get("score") or 0)
+        if score < threshold:
+            continue
+        if not row.get("recommend") and score < max(78, threshold):
             continue
         if row.get("priority") == "skip":
             continue

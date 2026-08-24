@@ -6,8 +6,9 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .config import get_bool, get_int, load_env
 from . import ingest, intelligence, recommender
-from .feishu import format_push, push_text
+from .feishu import feishu_status, format_push, push_text
 from .memory_bridge import remember_fact
 from .memory_os import HierarchicalMemory
 from .store import LocalMemory
@@ -21,6 +22,7 @@ DATA_DIR = ROOT / "data"
 
 class RadarService:
     def __init__(self, data_dir: Path | None = None, sources_path: Path | None = None) -> None:
+        load_env()
         root = data_dir or DATA_DIR
         self.memory = LocalMemory(root)
         self.hierarchy = HierarchicalMemory(root, self.memory)
@@ -29,12 +31,20 @@ class RadarService:
 
     def status(self) -> dict:
         from . import llm
+        feishu = feishu_status()
 
         return {
             "ok": True,
             "demo": "observe-understand-memory-recommend-feedback",
             "llm": llm.llm_status(),
-            "feishu": bool((os.environ.get("FEISHU_WEBHOOK_URL") or "").strip()),
+            "feishu": feishu["ok"],
+            "feishu_detail": feishu,
+            "feishu_app": feishu["app_bot"],
+            "push": {
+                "threshold": get_int("RADAR_PUSH_THRESHOLD", 85),
+                "limit": get_int("RADAR_PUSH_LIMIT", 2),
+                "dry_run": get_bool("RADAR_PUSH_DRY_RUN", False),
+            },
             "memory": self._memory_snapshot(),
         }
 
@@ -111,12 +121,17 @@ class RadarService:
         return self._push_item(feed[0])
 
     def _auto_push(self, candidates: list[dict]) -> list[dict]:
-        picked = recommender.pick_push(candidates, self.memory.pushed_ids(), limit=2)
+        picked = recommender.pick_push(
+            candidates,
+            self.memory.pushed_ids(),
+            limit=get_int("RADAR_PUSH_LIMIT", 2),
+            threshold=get_int("RADAR_PUSH_THRESHOLD", 85),
+        )
         results = []
         for item in picked:
             pushed = self._push_item(item)
             results.append(pushed)
-            if pushed.get("ok") or pushed.get("reason") == "FEISHU_WEBHOOK_URL not set":
+            if pushed.get("ok"):
                 self.memory.mark_pushed(item["id"])
                 self.hierarchy.add_memory(
                     user_input=f"系统准备把《{item.get('title')}》推到飞书",

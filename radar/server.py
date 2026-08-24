@@ -8,9 +8,11 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .config import load_env
 from .pipeline import RadarService
 from .store import DEFAULT_PROFILE
 
+load_env()
 WEB = Path(os.environ.get("RADAR_WEB_DIR", Path(__file__).resolve().parents[1] / "web"))
 HOST = os.environ.get("RADAR_HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT") or os.environ.get("RADAR_PORT") or 8765)
@@ -36,6 +38,7 @@ def make_handler(service: RadarService):
                         "llm": st["llm"].get("enabled"),
                         "model": st["llm"].get("model"),
                         "feishu": st["feishu"],
+                        "feishu_channel": st.get("feishu_detail", {}).get("channel"),
                     },
                 )
             if path == "/api/status":

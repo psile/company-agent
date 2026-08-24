@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from radar.feishu import format_push
+from radar.feishu import _app_message_payload, _lookup_open_id_by_mobile, _sign, format_push
 from radar.ingest import parse_atom, parse_rss
 from radar.intelligence import understand_heuristic
 from radar.llm import parse_json_object
@@ -137,6 +137,19 @@ def test_already_pushed_not_selected_again():
     assert pick_push([item], ["keep-me"]) == []
 
 
+def test_push_threshold_keeps_low_relevance_quiet():
+    item = {
+        "id": "maybe-later",
+        "title": "Some adjacent AI news",
+        "score": 79,
+        "recommend": True,
+        "priority": "normal",
+        "source_url": "https://example.com/y",
+    }
+    assert pick_push([item], [], threshold=85) == []
+    assert pick_push([item], [], threshold=75)[0]["id"] == "maybe-later"
+
+
 def test_push_copy_has_chinese_summary_and_tags():
     text = format_push(
         {
@@ -153,6 +166,29 @@ def test_push_copy_has_chinese_summary_and_tags():
     assert "长期记忆" in text
     assert "中文" not in text or "引入时间衰减" in text
     assert "https://example.com/m" in text
+
+
+def test_feishu_sign_matches_official_shape():
+    sign = _sign("1599360473", "demo")
+    assert sign
+    assert "\n" not in sign
+
+
+def test_feishu_app_message_payload_content_is_json_string():
+    payload = _app_message_payload("me@example.com", "你好")
+    assert payload["receive_id"] == "me@example.com"
+    assert payload["msg_type"] == "text"
+    assert payload["content"] == '{"text": "你好"}' or '"你好"' in payload["content"]
+
+
+def test_mobile_lookup_handles_empty_user_list(monkeypatch):
+    def fake_post_json(*args, **kwargs):
+        return {"ok": True, "data": {"data": {"user_list": []}}}
+
+    monkeypatch.setattr("radar.feishu._post_json", fake_post_json)
+    out = _lookup_open_id_by_mobile("token", "13800138000")
+    assert not out["ok"]
+    assert "mobile" in out["reason"]
 
 
 def test_dislike_lowers_topic(tmp_path, monkeypatch):

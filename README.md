@@ -40,7 +40,7 @@
 ## 运行
 
 ```powershell
-cd D:\working\company_agent\radar
+cd D:\hobby\AI_agent\memory\company-agent
 python -m radar serve
 ```
 
@@ -60,9 +60,28 @@ python -m radar serve
 python -m pytest -q
 ```
 
+主动推送有两个命令：
+
+```powershell
+# 拉取订阅源，重新排序，并把高相关内容自动推到飞书
+python -m radar ingest
+
+# 不刷新订阅源，直接把当前“为你”列表第一条推到飞书
+python -m radar push
+
+# 只测试飞书通道
+python -m radar feishu-test
+```
+
+如果 `python -m radar ingest` 显示 `pushed=0`，通常不是飞书坏了，而是没有内容达到 `RADAR_PUSH_THRESHOLD`。可以临时把 `.env` 里的阈值调低，例如：
+
+```powershell
+RADAR_PUSH_THRESHOLD=70
+```
+
 ## 配置
 
-复制 `env.example`，用环境变量填，不要把密钥写进仓库。
+复制 `env.example`，用环境变量填，不要把密钥写进仓库。也可以在项目根目录创建 `.env`，或创建 `data/.env`；程序启动时会自动读取，且不会覆盖已存在的系统环境变量。
 
 | 变量 | 含义 |
 |---|---|
@@ -70,10 +89,106 @@ python -m pytest -q
 | `LLM_API_KEY` | 密钥 |
 | `LLM_MODEL` | 模型名 |
 | `FEISHU_WEBHOOK_URL` | 飞书自定义机器人；不配则只准备文案 |
+| `FEISHU_SECRET` | 飞书机器人签名密钥；机器人未开启签名可不填 |
+| `FEISHU_APP_ID` | 飞书自建应用 App ID；配置后优先走一对一应用机器人 |
+| `FEISHU_APP_SECRET` | 飞书自建应用 App Secret |
+| `FEISHU_RECEIVE_ID_TYPE` | 接收人类型，个人推送建议先用 `email` |
+| `FEISHU_RECEIVE_ID` | 接收人 ID；`email` 模式下填你的飞书登录邮箱 |
+| `FEISHU_RECEIVE_MOBILE` | 手机号登录时可填绑定手机号，系统会先换取 `open_id` |
+| `RADAR_PUSH_THRESHOLD` | 自动飞书推送分数阈值，默认 85 |
+| `RADAR_PUSH_LIMIT` | 每次刷新最多主动推送几条，默认 2 |
+| `RADAR_PUSH_DRY_RUN=1` | 只生成飞书文案，不真实发送 |
 | `RADAR_LLM=0` | 关掉模型，退回启发式 |
 | `MEMORYOS_ENABLED=1` | 尝试官方 MemoryOS（需自备依赖） |
 
 本机若旁边还有 `RadarME/js/config.js`，会当作网关兜底，那不是本仓库的一部分。
+
+## 接入飞书
+
+推荐优先用「一对一应用机器人」做个人秘书私聊推送；群自定义机器人更适合临时通知群或只有自己的小群。
+
+### 一对一应用机器人
+
+适合个人秘书私聊推送。需要飞书自建应用开启机器人能力，并申请 `im:message:send_as_bot` 权限。
+
+管理后台流程：
+
+1. 打开飞书开放平台，创建企业自建应用。
+2. 在「应用能力」里开启机器人能力。
+3. 在「权限管理」里批量导入权限：
+
+```json
+{
+  "scopes": {
+    "tenant": [
+      "im:message:send_as_bot",
+      "contact:user.id:readonly",
+      "docx:document:readonly"
+    ],
+    "user": [
+      "docx:document:readonly"
+    ]
+  }
+}
+```
+
+4. 在「版本管理与发布」里创建版本并提交发布，等待管理员审核通过。
+5. 在「凭证与基础信息」复制 `App ID` 和 `App Secret`。
+6. 确认应用可用范围包含接收人本人。
+
+在本机创建 `.env`：
+
+```powershell
+FEISHU_APP_ID=cli_xxx
+FEISHU_APP_SECRET=xxx
+FEISHU_RECEIVE_ID_TYPE=email
+FEISHU_RECEIVE_ID=your.name@example.com
+RADAR_PUSH_THRESHOLD=85
+RADAR_PUSH_LIMIT=2
+```
+
+只要这组配置完整，系统会优先发一对一应用机器人消息。
+
+如果飞书账号是手机号登录，没有邮箱，可以改成：
+
+```powershell
+FEISHU_APP_ID=cli_xxx
+FEISHU_APP_SECRET=xxx
+FEISHU_RECEIVE_ID_TYPE=open_id
+FEISHU_RECEIVE_ID=
+FEISHU_RECEIVE_MOBILE=13800138000
+```
+
+手机号换取 `open_id` 需要额外权限：`contact:user.id:readonly`。导入权限后同样要发布版本并通过审核。
+
+测试一对一推送：
+
+```powershell
+python -m radar feishu-test
+```
+
+如果测试成功但刷新源没有推送，通常是没有内容达到 `RADAR_PUSH_THRESHOLD`，或该条内容已经在 `data/pushed.json` 中标记为推过。
+
+### 群自定义机器人
+
+1. 在飞书群里添加「自定义机器人」，复制 webhook 地址。
+2. 如果机器人开启了签名校验，同时复制签名密钥。
+3. 在 `.env` 里写：
+
+```powershell
+FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/...
+FEISHU_SECRET=
+RADAR_PUSH_THRESHOLD=85
+RADAR_PUSH_LIMIT=2
+```
+
+如果机器人没有开启签名，`FEISHU_SECRET` 留空即可。想先看文案、不真实发送，可以设：
+
+```powershell
+RADAR_PUSH_DRY_RUN=1
+```
+
+刷新源时，系统只会把高相关、未推过的「为你」内容推到飞书；未配置 webhook 时只返回中文推送文案，不会假装已发送。
 
 ## 反馈怎么进记忆
 

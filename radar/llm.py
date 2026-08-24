@@ -10,6 +10,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from .config import load_env
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
@@ -17,6 +19,7 @@ RADARME_CONFIG = Path(__file__).resolve().parents[2] / "RadarME" / "js" / "confi
 
 
 def llm_status() -> dict[str, Any]:
+    load_env()
     cfg = load_llm_config()
     off = os.environ.get("RADAR_LLM", "1").strip().lower() in {"0", "false", "no", "off"}
     return {
@@ -28,6 +31,7 @@ def llm_status() -> dict[str, Any]:
 
 
 def load_llm_config() -> dict[str, str]:
+    load_env()
     base = (os.environ.get("LLM_BASE_URL") or "").strip().rstrip("/")
     key = (os.environ.get("LLM_API_KEY") or "").strip()
     model = (os.environ.get("LLM_MODEL") or "").strip()
