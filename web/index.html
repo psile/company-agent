@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>为你发现</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+  <header class="mast">
+    <div class="brand">
+      <p class="kicker">Observe · Understand · Memory · Recommend</p>
+      <h1>为你发现</h1>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab is-on" data-tab="intel" type="button">情报</button>
+      <button class="tab" data-tab="for_you" type="button">为你</button>
+      <button class="tab" data-tab="memory" type="button">记忆</button>
+    </nav>
+    <div class="tools">
+      <p class="meta" id="statusLine">正在接通</p>
+      <button class="btn" id="refreshBtn" type="button">刷新源</button>
+    </div>
+  </header>
+
+  <main class="stage">
+    <section class="feed" id="feedPane" aria-live="polite"></section>
+    <aside class="rail">
+      <section class="panel">
+        <h2>当前项目</h2>
+        <p class="summary" id="projectLine"></p>
+      </section>
+      <section class="panel">
+        <h2>兴趣权重</h2>
+        <p class="hint">点开、有用、收藏会升高；不相关会下降。</p>
+        <div class="chips" id="interestChips"></div>
+      </section>
+      <section class="panel">
+        <h2>负反馈</h2>
+        <div class="chips" id="dislikeChips"></div>
+      </section>
+      <section class="panel">
+        <h2>短期记忆</h2>
+        <ol class="memory" id="shortMemory"></ol>
+      </section>
+      <section class="panel" id="pushPanel" hidden>
+        <h2>飞书</h2>
+        <ul class="push-log" id="pushLog"></ul>
+      </section>
+    </aside>
+  </main>
+
+  <p class="toast" id="toast" hidden></p>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,173 @@
+from pathlib import Path
+
+from radar.feishu import format_push
+from radar.ingest import parse_atom, parse_rss
+from radar.intelligence import understand_heuristic
+from radar.llm import parse_json_object
+from radar.models import RawItem
+from radar.pipeline import RadarService
+from radar.recommender import pick_push, rank_for_you
+from radar.store import LocalMemory
+from radar.user_memory import UserMemory
+
+
+ATOM = """<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>Agent Memory for RAG</title>
+    <summary>We study long-term memory in agents.</summary>
+    <published>2026-08-01T00:00:00Z</published>
+    <id>http://arxiv.org/abs/2601.00001</id>
+    <link rel="alternate" href="https://arxiv.org/abs/2601.00001"/>
+  </entry>
+</feed>
+"""
+
+RSS = """<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <title>OpenAI launch event</title>
+      <link>https://example.com/launch</link>
+      <description>Keynote and GPU news.</description>
+    </item>
+  </channel>
+</rss>
+"""
+
+
+def test_parse_atom_keeps_url():
+    spec = {"id": "arxiv", "name": "ArXiv", "kind": "arxiv", "type": "paper"}
+    items = parse_atom(ATOM, spec)
+    assert items[0].source_url.startswith("https://arxiv.org")
+    assert "Memory" in items[0].title or "memory" in items[0].summary.lower()
+    assert items[0].item_type == "paper"
+
+
+def test_parse_rss():
+    spec = {"id": "news", "name": "News", "kind": "rss", "type": "news"}
+    items = parse_rss(RSS, spec)
+    assert items[0].source_url == "https://example.com/launch"
+    assert items[0].item_type == "news"
+
+
+def test_for_you_ranks_memory_above_funding(tmp_path: Path):
+    mem = UserMemory(tmp_path, LocalMemory(tmp_path))
+    paper = understand_heuristic(
+        RawItem("a", "ArXiv", "work", "Temporal Memory for Agents", "long-term memory ranking", "https://x/1", "2026-08-24T00:00:00Z", "paper")
+    )
+    news = understand_heuristic(
+        RawItem("b", "The Verge AI", "interest", "Startup raises Series B funding", "financing news", "https://x/2", "2026-08-24T00:00:00Z", "news")
+    )
+    ranked = rank_for_you([paper, news], mem.context())
+    assert ranked[0]["id"] == paper["id"]
+    assert "融资" in (news.get("tags") or [])
+
+
+def test_card_requires_url(tmp_path: Path):
+    mem = LocalMemory(tmp_path)
+    try:
+        mem.add_card({"title": "x", "summary": "y", "source_url": ""})
+        assert False, "should reject"
+    except ValueError:
+        pass
+    mem.add_card({"title": "x", "summary": "y", "source_url": "https://example.com/a"})
+    assert mem.cards()[0]["source_url"].startswith("http")
+
+
+def test_parse_llm_json_fenced():
+    parsed = parse_json_object('note\n```json\n{"channel":"work","keywords":["RAG"]}\n```')
+    assert parsed["channel"] == "work"
+    assert parsed["keywords"] == ["RAG"]
+
+
+def test_click_updates_interest_weight(tmp_path, monkeypatch):
+    monkeypatch.setenv("RADAR_LLM", "0")
+    monkeypatch.setenv("MEMORYOS_ENABLED", "0")
+    svc = RadarService(data_dir=tmp_path)
+    item = {
+        "id": "aaaaaaaaaaaa",
+        "title": "vLLM memory kernel",
+        "summary": "release notes",
+        "summary_zh": "vLLM 记忆内核有更新。",
+        "source_url": "https://example.com/vllm",
+        "source_name": "GitHub",
+        "tags": ["推理引擎", "长期记忆"],
+        "item_type": "release",
+        "score": 88,
+    }
+    svc.memory.save_feeds([], [item], intel=[], for_you=[item])
+    before = {row["topic"]: row["weight"] for row in svc.user_memory.interests()}
+    out = svc.track("aaaaaaaaaaaa", "open")
+    assert out["ok"]
+    assert svc.memory.events()[0]["action"] == "open"
+    assert svc.hierarchy.short_term()[0]["user_input"].startswith("我open了")
+    after = {row["topic"]: row["weight"] for row in svc.user_memory.interests()}
+    assert after.get("vLLM", 0) >= before.get("vLLM", 0)
+    assert after.get("长期记忆", 0) > 0.4
+
+
+def test_like_files_card_with_url(tmp_path, monkeypatch):
+    monkeypatch.setenv("RADAR_LLM", "0")
+    svc = RadarService(data_dir=tmp_path)
+    item = {
+        "id": "bbbbbbbbbbbb",
+        "title": "GPU launch party",
+        "summary": "keynote",
+        "source_url": "https://example.com/launch",
+        "source_name": "News",
+        "tags": ["产品发布"],
+        "item_type": "news",
+        "score": 70,
+    }
+    svc.memory.save_feeds([], [item], intel=[], for_you=[item])
+    out = svc.track("bbbbbbbbbbbb", "like")
+    assert out["card"]["source_url"].startswith("http")
+
+
+def test_already_pushed_not_selected_again():
+    item = {
+        "id": "keep-me",
+        "title": "vLLM Agent memory",
+        "score": 90,
+        "recommend": True,
+        "priority": "high",
+        "source_url": "https://example.com/x",
+    }
+    assert pick_push([item], ["keep-me"]) == []
+
+
+def test_push_copy_has_chinese_summary_and_tags():
+    text = format_push(
+        {
+            "title": "Mem0 Temporal Memory",
+            "summary_zh": "引入时间衰减，改进记忆排序。",
+            "tags": ["长期记忆", "开源发布"],
+            "why_you": "和当前 Memory 项目相关",
+            "project_value": "可参考时间衰减",
+            "score": 94,
+            "source_url": "https://example.com/m",
+        }
+    )
+    assert "总结" in text
+    assert "长期记忆" in text
+    assert "中文" not in text or "引入时间衰减" in text
+    assert "https://example.com/m" in text
+
+
+def test_dislike_lowers_topic(tmp_path, monkeypatch):
+    monkeypatch.setenv("RADAR_LLM", "0")
+    svc = RadarService(data_dir=tmp_path)
+    item = {
+        "id": "cccccccccccc",
+        "title": "Startup funding round",
+        "summary": "raises series B",
+        "source_url": "https://example.com/fund",
+        "tags": ["融资"],
+        "item_type": "news",
+    }
+    svc.memory.save_feeds([], [item], intel=[], for_you=[item])
+    svc.track("cccccccccccc", "dislike")
+    topics = {row["topic"]: row["weight"] for row in svc.user_memory.interests()}
+    assert topics.get("融资", 1) < 0.5
+    assert "融资" in svc.user_memory.behavior()["disliked_topics"]
