@@ -1,0 +1,52 @@
+{
+  "sources": [
+    {
+      "id": "arxiv-memory-agent",
+      "name": "ArXiv",
+      "kind": "arxiv",
+      "type": "paper",
+      "search": "all:\"long-term memory\" AND all:agent",
+      "max": 5
+    },
+    {
+      "id": "mem0-releases",
+      "name": "Mem0 Releases",
+      "kind": "github_releases",
+      "type": "release",
+      "repo": "mem0ai/mem0",
+      "max": 3
+    },
+    {
+      "id": "vllm-releases",
+      "name": "vLLM Releases",
+      "kind": "github_releases",
+      "type": "release",
+      "repo": "vllm-project/vllm",
+      "max": 3
+    },
+    {
+      "id": "hf-blog",
+      "name": "Hugging Face Blog",
+      "kind": "rss",
+      "type": "blog",
+      "url": "https://huggingface.co/blog/feed.xml",
+      "max": 5
+    },
+    {
+      "id": "openai-news",
+      "name": "OpenAI News",
+      "kind": "rss",
+      "type": "blog",
+      "url": "https://openai.com/news/rss.xml",
+      "max": 4
+    },
+    {
+      "id": "verge-ai",
+      "name": "The Verge AI",
+      "kind": "rss",
+      "type": "news",
+      "url": "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
+      "max": 5
+    }
+  ]
+}

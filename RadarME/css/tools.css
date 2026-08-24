@@ -1,0 +1,515 @@
+/* ====== 工具页 ====== */
+.tools-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: var(--sp-12);
+    margin-bottom: var(--sp-32);
+}
+
+.tool-entry {
+    background: var(--surface);
+    border-radius: var(--r-card);
+    border: 1px solid var(--border);
+    padding: var(--sp-24);
+    cursor: pointer;
+    transition: all var(--transition);
+}
+
+.tool-entry:hover {
+    border-color: var(--border-strong);
+    background: var(--surface-raised);
+}
+
+.tool-entry h3 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: var(--sp-6);
+    letter-spacing: -0.01em;
+}
+
+.tool-entry p {
+    font-size: 14px;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+/* 工具面板 */
+.tool-panel {
+    background: var(--surface);
+    border-radius: var(--r-panel);
+    border: 1px solid var(--border);
+    padding: var(--sp-40);
+    position: relative;
+    min-height: 200px;
+}
+
+.btn-close-panel {
+    position: absolute;
+    top: var(--sp-16);
+    right: var(--sp-16);
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 13px;
+    font-family: var(--font-sans);
+    padding: 6px 12px;
+    border-radius: var(--r-control);
+    transition: all var(--transition);
+}
+
+.btn-close-panel:hover {
+    background: var(--surface-raised);
+    color: var(--text);
+}
+
+.tool-panel h2 {
+    font-size: 22px;
+    font-weight: 600;
+    margin-bottom: var(--sp-8);
+    letter-spacing: -0.02em;
+}
+
+.tool-panel .hint {
+    margin-bottom: var(--sp-24);
+}
+
+/* ====== 打卡计算 ====== */
+.clock-tool {
+    max-width: 520px;
+}
+
+.clock-row {
+    display: flex;
+    gap: var(--sp-16);
+    margin-bottom: var(--sp-20);
+    flex-wrap: wrap;
+}
+
+.clock-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-6);
+}
+
+.clock-field label {
+    font-size: 14px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.clock-field input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    padding: 11px 14px;
+    color: var(--text);
+    font-size: 16px;
+    width: 130px;
+    outline: none;
+    transition: border-color var(--transition);
+    font-family: var(--font-sans);
+}
+
+.clock-field input:focus {
+    border-color: var(--text);
+}
+
+.clock-result {
+    background: var(--bg);
+    border-radius: var(--r-card);
+    border: 1px solid var(--border);
+    padding: var(--sp-20);
+    margin-top: var(--sp-16);
+}
+
+.clock-result-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.clock-result-row:last-child {
+    border-bottom: none;
+}
+
+.clock-result-row .label {
+    color: var(--text-secondary);
+    font-size: 15px;
+}
+
+.clock-result-row .value {
+    font-size: 19px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.clock-result-row .value.accent {
+    color: var(--accent);
+}
+
+.clock-result-row .value.warning {
+    color: var(--warning);
+}
+
+.clock-result-row .value.ok {
+    color: var(--success);
+}
+
+/* ====== 日报/周报 ====== */
+.report-tool {
+    max-width: 680px;
+}
+
+.report-type-tabs {
+    display: flex;
+    gap: var(--sp-8);
+    margin-bottom: var(--sp-20);
+}
+
+.report-type-tab {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 8px 18px;
+    border-radius: var(--r-control);
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    font-family: var(--font-sans);
+    transition: all var(--transition);
+}
+
+.report-type-tab:hover {
+    border-color: var(--border-strong);
+}
+
+.report-type-tab.active {
+    background: var(--text);
+    color: var(--bg);
+    border-color: var(--text);
+}
+
+.report-label {
+    font-size: 14px;
+    color: var(--text-secondary);
+    font-weight: 500;
+    display: block;
+    margin-bottom: var(--sp-6);
+}
+
+.report-bullets {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    padding: var(--sp-12) var(--sp-14);
+    color: var(--text);
+    font-size: 15px;
+    font-family: var(--font-sans);
+    resize: vertical;
+    min-height: 120px;
+    outline: none;
+    line-height: 1.6;
+    transition: border-color var(--transition);
+}
+
+.report-bullets:focus {
+    border-color: var(--text);
+}
+
+.report-actions {
+    display: flex;
+    gap: var(--sp-8);
+    margin-top: var(--sp-12);
+}
+
+.report-output {
+    background: var(--bg);
+    border-radius: var(--r-card);
+    border: 1px solid var(--border);
+    padding: var(--sp-20);
+    margin-top: var(--sp-20);
+    white-space: pre-wrap;
+    line-height: 1.75;
+    font-size: 15px;
+    min-height: 80px;
+    color: var(--text);
+}
+
+/* ====== 习惯 ====== */
+.habit-tool {
+    max-width: 580px;
+}
+
+.habit-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-8);
+    margin-bottom: var(--sp-20);
+}
+
+.habit-card {
+    background: var(--bg);
+    border-radius: var(--r-card);
+    padding: var(--sp-12) var(--sp-16);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.habit-info {
+    flex: 1;
+}
+
+.habit-name {
+    font-size: 15px;
+    font-weight: 550;
+    margin-bottom: 2px;
+}
+
+.habit-desc {
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.habit-streak {
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    margin-right: var(--sp-8);
+}
+
+.habit-add-area {
+    display: flex;
+    gap: var(--sp-8);
+    margin-bottom: var(--sp-16);
+}
+
+.habit-add-area input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    padding: 10px 14px;
+    color: var(--text);
+    font-size: 15px;
+    outline: none;
+    font-family: var(--font-sans);
+    transition: border-color var(--transition);
+}
+
+.habit-add-area input:focus {
+    border-color: var(--text);
+}
+
+.habit-empty {
+    color: var(--text-muted);
+    padding: var(--sp-20) 0;
+    font-size: 15px;
+}
+
+.habit-delete {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: color var(--transition);
+    font-family: var(--font-sans);
+}
+
+.habit-delete:hover {
+    color: var(--danger);
+}
+
+/* ====== 收藏 ====== */
+.favorites-tool {
+    max-width: 760px;
+}
+
+.fav-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-8);
+}
+
+.fav-card {
+    background: var(--bg);
+    border-radius: var(--r-card);
+    padding: var(--sp-14) var(--sp-16);
+    border: 1px solid var(--border);
+    transition: border-color var(--transition);
+}
+
+.fav-card:hover {
+    border-color: var(--border-strong);
+}
+
+.fav-title {
+    font-size: 16px;
+    font-weight: 550;
+    margin-bottom: var(--sp-4);
+}
+
+.fav-summary {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.fav-meta {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: var(--sp-6);
+    text-transform: lowercase;
+}
+
+.fav-empty {
+    text-align: center;
+    color: var(--text-muted);
+    padding: var(--sp-40);
+    font-size: 15px;
+}
+
+/* ====== 待办 ====== */
+.todo-tool {
+    max-width: 580px;
+}
+
+.todo-input-area {
+    display: flex;
+    gap: var(--sp-8);
+    margin-bottom: var(--sp-16);
+}
+
+.todo-input-area input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    padding: 10px 14px;
+    color: var(--text);
+    font-size: 15px;
+    outline: none;
+    font-family: var(--font-sans);
+    transition: border-color var(--transition);
+}
+
+.todo-input-area input:focus {
+    border-color: var(--text);
+}
+
+.todo-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-4);
+}
+
+.todo-item {
+    background: var(--bg);
+    border-radius: var(--r-control);
+    padding: var(--sp-12) var(--sp-16);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: var(--sp-12);
+    transition: border-color var(--transition);
+}
+
+.todo-item:hover {
+    border-color: var(--border-strong);
+}
+
+.todo-check {
+    width: 20px;
+    height: 20px;
+    border: 1.5px solid var(--border-strong);
+    border-radius: 4px;
+    cursor: pointer;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition);
+}
+
+.todo-check.done {
+    background: var(--text);
+    border-color: var(--text);
+}
+
+.todo-check.done::after {
+    content: "";
+    width: 6px;
+    height: 10px;
+    border: solid var(--bg);
+    border-width: 0 1.5px 1.5px 0;
+    transform: rotate(45deg) translateY(-1px);
+}
+
+.todo-text {
+    flex: 1;
+    font-size: 15px;
+    color: var(--text);
+}
+
+.todo-item.done .todo-text {
+    text-decoration: line-through;
+    color: var(--text-muted);
+}
+
+.todo-delete {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: color var(--transition);
+    font-family: var(--font-sans);
+}
+
+.todo-delete:hover {
+    color: var(--danger);
+}
+
+.todo-empty {
+    color: var(--text-muted);
+    padding: var(--sp-20) 0;
+    font-size: 15px;
+}
+
+/* ====== Loading ====== */
+.loading-block {
+    text-align: center;
+    padding: var(--sp-64) var(--sp-20);
+    color: var(--text-muted);
+}
+
+.loading-spinner {
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    border: 2px solid var(--border);
+    border-top-color: var(--text);
+    border-radius: 50%;
+    animation: spin 700ms linear infinite;
+    margin-bottom: var(--sp-12);
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.loading-block p {
+    font-size: 15px;
+}

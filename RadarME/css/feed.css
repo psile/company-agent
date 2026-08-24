@@ -1,0 +1,239 @@
+/* ====== 推荐流 ====== */
+.feed-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--sp-32);
+}
+
+.feed-tabs {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-16);
+}
+
+.feed-tab {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    padding: 0;
+    cursor: pointer;
+    font-size: 17px;
+    font-weight: 500;
+    font-family: var(--font-sans);
+    transition: color var(--transition);
+    position: relative;
+}
+
+.feed-tab:hover {
+    color: var(--text-secondary);
+}
+
+.feed-tab.active {
+    color: var(--text);
+}
+
+.feed-tab.active::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -8px;
+    height: 2px;
+    background: var(--text);
+}
+
+.tab-divider {
+    width: 1px;
+    height: 18px;
+    background: var(--border);
+}
+
+.feed-stream {
+    display: none;
+}
+
+.feed-stream.active {
+    display: block;
+}
+
+/* 空状态 */
+.feed-empty {
+    text-align: center;
+    padding: var(--sp-80) var(--sp-20);
+    color: var(--text-muted);
+}
+
+.feed-empty p {
+    font-size: 16px;
+    margin-bottom: var(--sp-24);
+}
+
+/* 推荐条目：编辑式列表，非卡片堆砌 */
+.feed-item {
+    padding: var(--sp-24) 0;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: var(--sp-20);
+    align-items: flex-start;
+    transition: background var(--transition);
+}
+
+.feed-item:hover {
+    background: var(--surface-raised);
+    margin: 0 calc(-1 * var(--sp-16));
+    padding-left: var(--sp-16);
+    padding-right: var(--sp-16);
+}
+
+.feed-item-index {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    min-width: 26px;
+    padding-top: 2px;
+}
+
+.feed-item-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.feed-item-title {
+    font-size: 18px;
+    font-weight: 550;
+    color: var(--text);
+    line-height: 1.45;
+    margin-bottom: var(--sp-4);
+    letter-spacing: -0.01em;
+}
+
+.feed-item-summary {
+    font-size: 15px;
+    color: var(--text-secondary);
+    line-height: 1.55;
+    margin-bottom: var(--sp-10);
+}
+
+.feed-item-why {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+.feed-item-score {
+    color: var(--accent);
+    font-weight: 550;
+}
+
+.feed-item-link {
+    color: var(--accent);
+    text-decoration: none;
+}
+
+.feed-item-link:hover {
+    text-decoration: underline;
+}
+
+.feed-item-type {
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 500;
+    font-size: 12px;
+    color: var(--accent);
+}
+
+.feed-item-actions {
+    display: flex;
+    gap: var(--sp-4);
+    opacity: 0;
+    transition: opacity var(--transition);
+    flex-shrink: 0;
+    align-self: center;
+}
+
+.feed-item:hover .feed-item-actions {
+    opacity: 1;
+}
+
+.icon-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 7px 12px;
+    border-radius: var(--r-control);
+    font-size: 13px;
+    font-weight: 450;
+    font-family: var(--font-sans);
+    transition: all var(--transition);
+}
+
+.icon-btn:hover {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+}
+
+/* ====== 流式生成进度 ====== */
+.stream-progress {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-panel);
+    padding: var(--sp-24) var(--sp-32);
+}
+
+.stream-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--sp-20);
+}
+
+.stream-status {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-12);
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text);
+}
+
+.stream-timer {
+    font-size: 14px;
+    font-weight: 550;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+    background: var(--accent-light);
+    padding: 2px 10px;
+    border-radius: 12px;
+}
+
+.stream-preview {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--r-card);
+    padding: var(--sp-16);
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    min-height: 56px;
+    max-height: 220px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.stream-preview:empty::before {
+    content: "正在连接模型...";
+    color: var(--text-muted);
+}
+
+.stream-progress .loading-spinner {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    border-width: 2px;
+}

@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RadarME</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/feed.css">
+    <link rel="stylesheet" href="css/targets.css">
+    <link rel="stylesheet" href="css/tools.css">
+    <link rel="stylesheet" href="css/manager.css">
+</head>
+<body>
+    <div id="app">
+        <!-- 侧边栏 -->
+        <nav class="sidebar">
+            <div class="sidebar-brand">
+                <span class="brand-mark">R</span>
+                <span class="brand-name">RadarME</span>
+            </div>
+            <ul class="nav-list">
+                <li class="nav-item active" data-page="feed">
+                    <span class="nav-label">推荐流</span>
+                </li>
+                <li class="nav-item" data-page="targets">
+                    <span class="nav-label">目标</span>
+                </li>
+                <li class="nav-item" data-page="tools">
+                    <span class="nav-label">工具</span>
+                </li>
+                <li class="nav-item" data-page="manager">
+                    <span class="nav-label">管理</span>
+                </li>
+            </ul>
+            <div class="sidebar-footer">
+                <div class="user-card">
+                    <div class="avatar">M</div>
+                    <span class="user-name">Me</span>
+                </div>
+            </div>
+        </nav>
+
+        <!-- 主内容 -->
+        <main class="main-content">
+            <!-- ========== 推荐流 ========== -->
+            <section id="page-feed" class="page active">
+                <header class="page-header">
+                    <h1>推荐流</h1>
+                    <div>
+                        <button class="btn-ghost" id="btn-push-feishu">推送到飞书</button>
+                        <button class="btn-ghost" id="btn-refresh-feed">刷新真源</button>
+                    </div>
+                </header>
+                <p class="page-sub">工作推荐 = 信息找人（ArXiv / GitHub / 博客 RSS）。个人推荐 = 休闲向科技源。条目带原链，点「有用」进个人库。</p>
+                <div class="feed-toolbar">
+                    <div class="feed-tabs">
+                        <button class="feed-tab active" data-feed="work">工作推荐</button>
+                        <span class="tab-divider"></span>
+                        <button class="feed-tab" data-feed="personal">个人推荐</button>
+                    </div>
+                </div>
+                <div class="feed-container">
+                    <div id="work-feed" class="feed-stream active"></div>
+                    <div id="personal-feed" class="feed-stream"></div>
+                </div>
+            </section>
+
+            <!-- ========== 目标 ========== -->
+            <section id="page-targets" class="page">
+                <header class="page-header">
+                    <h1>目标</h1>
+                    <button class="btn-primary" id="btn-add-target">新建目标</button>
+                </header>
+                <div class="targets-container">
+                    <div class="target-column" data-type="today">
+                        <div class="column-header">
+                            <h2>今日</h2>
+                            <span class="count-badge" id="count-today">0</span>
+                        </div>
+                        <div class="target-list" id="list-today"></div>
+                    </div>
+                    <div class="target-column" data-type="short">
+                        <div class="column-header">
+                            <h2>短期</h2>
+                            <span class="count-badge" id="count-short">0</span>
+                        </div>
+                        <div class="target-list" id="list-short"></div>
+                    </div>
+                    <div class="target-column" data-type="long">
+                        <div class="column-header">
+                            <h2>长期</h2>
+                            <span class="count-badge" id="count-long">0</span>
+                        </div>
+                        <div class="target-list" id="list-long"></div>
+                    </div>
+                    <div class="target-column" data-type="casual">
+                        <div class="column-header">
+                            <h2>不定期</h2>
+                            <span class="count-badge" id="count-casual">0</span>
+                        </div>
+                        <div class="target-list" id="list-casual"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ========== 工具 ========== -->
+            <section id="page-tools" class="page">
+                <header class="page-header">
+                    <h1>工具</h1>
+                </header>
+                <div class="tools-grid">
+                    <div class="tool-entry" data-tool="clock">
+                        <h3>打卡计算</h3>
+                        <p>计算工时与建议下班时间</p>
+                    </div>
+                    <div class="tool-entry" data-tool="report">
+                        <h3>日报 / 周报</h3>
+                        <p>输入要点，AI 生成汇报</p>
+                    </div>
+                    <div class="tool-entry" data-tool="habit">
+                        <h3>习惯</h3>
+                        <p>设定习惯，每日推送相关内容</p>
+                    </div>
+                    <div class="tool-entry" data-tool="favorites">
+                        <h3>收藏</h3>
+                        <p>收藏有价值的内容</p>
+                    </div>
+                    <div class="tool-entry" data-tool="todo">
+                        <h3>待办</h3>
+                        <p>快速记录待办事项</p>
+                    </div>
+                </div>
+                <div class="tool-panel" id="tool-panel" style="display:none;">
+                    <button class="btn-close-panel" id="btn-close-panel">关闭</button>
+                    <div id="tool-panel-content"></div>
+                </div>
+            </section>
+
+            <!-- ========== 管理 ========== -->
+            <section id="page-manager" class="page">
+                <header class="page-header">
+                    <h1>管理</h1>
+                </header>
+                <div class="manager-container">
+                    <div class="manager-sidenav">
+                        <button class="manager-tab active" data-mtab="chat">对话调优</button>
+                        <button class="manager-tab" data-mtab="knowledge">知识库</button>
+                        <button class="manager-tab" data-mtab="sniff">嗅探关键词</button>
+                    </div>
+                    <div class="manager-panel">
+                        <!-- 对话 -->
+                        <div id="mtab-chat" class="mtab-panel active">
+                            <div class="chat-window">
+                                <div class="chat-messages" id="chat-messages">
+                                    <div class="chat-msg ai">
+                                        <div class="msg-bubble">你好。告诉我你的偏好或需求，我会帮你精调推荐流。比如「我对大模型推理优化很感兴趣」「减少 AI 新闻类推送」。</div>
+                                    </div>
+                                </div>
+                                <div class="chat-input-area">
+                                    <input type="text" id="chat-input" placeholder="输入偏好或指令...">
+                                    <button class="btn-primary btn-sm" id="btn-chat-send">发送</button>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- 知识库 -->
+                        <div id="mtab-knowledge" class="mtab-panel">
+                            <div class="sub-panel-header">
+                                <h2>知识图谱</h2>
+                                <p class="hint">阅读历史决定推荐难度——从入门到精通。</p>
+                            </div>
+                            <div class="knowledge-grid" id="knowledge-grid"></div>
+                        </div>
+                        <!-- 嗅探 -->
+                        <div id="mtab-sniff" class="mtab-panel">
+                            <div class="sub-panel-header">
+                                <h2>嗅探关键词</h2>
+                                <p class="hint">雷达正在追踪这些关键词，增删可精调推荐。</p>
+                                <div class="sniff-input-area">
+                                    <input type="text" id="sniff-input" placeholder="添加追踪关键词...">
+                                    <button class="btn-primary btn-sm" id="btn-add-sniff">添加</button>
+                                </div>
+                            </div>
+                            <div class="sniff-cloud" id="sniff-cloud"></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <div id="toast" class="toast"></div>
+    </div>
+
+    <!-- 目标编辑弹窗 -->
+    <div class="modal-overlay" id="modal-target">
+        <div class="modal-box">
+            <h3 id="modal-target-title">新建目标</h3>
+            <input type="hidden" id="target-edit-id">
+            <div class="form-field">
+                <label for="target-edit-type">类型</label>
+                <select id="target-edit-type">
+                    <option value="today">今日</option>
+                    <option value="short">短期</option>
+                    <option value="long">长期</option>
+                    <option value="casual">不定期</option>
+                </select>
+            </div>
+            <div class="form-field">
+                <label for="target-edit-text">内容</label>
+                <textarea id="target-edit-text" rows="3" placeholder="描述你的目标..."></textarea>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-ghost" id="btn-target-cancel">取消</button>
+                <button class="btn-primary" id="btn-target-save">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/llm.js"></script>
+    <script src="js/store.js"></script>
+    <script src="js/app.js"></script>
+    <script src="js/feed.js"></script>
+    <script src="js/targets.js"></script>
+    <script src="js/tools.js"></script>
+    <script src="js/manager.js"></script>
+    <script>App.init();</script>
+</body>
+</html>

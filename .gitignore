@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+*.egg-info/
+
+# 本地数据与密钥（不要入库）
+.env
+.env.*
+!.env.example
+radar/data/
+!radar/data/.gitignore
+radar/data/llm.json
+*.zip
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# EchoBot 运行时
+.echobot/
+logs/
+example_projects/
