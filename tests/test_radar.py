@@ -207,3 +207,40 @@ def test_dislike_lowers_topic(tmp_path, monkeypatch):
     topics = {row["topic"]: row["weight"] for row in svc.user_memory.interests()}
     assert topics.get("融资", 1) < 0.5
     assert "融资" in svc.user_memory.behavior()["disliked_topics"]
+
+
+def test_parse_follow_and_classify():
+    from radar.workspace import classify_knowledge, parse_follow_text
+
+    rows = parse_follow_text("最近帮我重点关注 Agent Memory 和 Memory Skill")
+    topics = {row["topic"] for row in rows}
+    assert "Agent Memory" in topics
+    assert "Memory Skill" in topics
+    assert classify_knowledge({"title": "Mem0 Temporal Memory"}) == "Agent Memory"
+
+
+def test_dashboard_follow_and_feedback_note(tmp_path, monkeypatch):
+    monkeypatch.setenv("RADAR_LLM", "0")
+    svc = RadarService(data_dir=tmp_path)
+    dash = svc.dashboard()
+    assert dash["ok"]
+    assert "observe" in dash
+    assert dash["goals"]
+    out = svc.add_follow("最近帮我重点关注 Agent Memory 和 RAG")
+    assert out["ok"]
+    topics = {row["topic"] for row in svc.user_memory.interests()}
+    assert "RAG" in topics
+    item = {
+        "id": "dddddddddddd",
+        "title": "Mem0 Temporal Memory",
+        "summary": "long-term memory",
+        "source_url": "https://example.com/mem0",
+        "tags": ["Agent Memory"],
+        "item_type": "blog",
+    }
+    svc.memory.save_feeds([], [item], intel=[], for_you=[item])
+    tracked = svc.track("dddddddddddd", "useful")
+    assert "提高" in tracked["note"]
+    collected = svc.track("dddddddddddd", "collect")
+    assert "Agent Memory" in collected["note"]
+    assert collected["card"]["category"] == "Agent Memory"

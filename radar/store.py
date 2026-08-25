@@ -49,9 +49,22 @@ class LocalMemory:
         rows = self.cards()
         if any(row.get("source_url") == card["source_url"] for row in rows):
             return card
+        if not card.get("id"):
+            card["id"] = _item_id(card["source_url"])
         rows.insert(0, card)
         self.cards_path.write_text(json.dumps(rows[:200], ensure_ascii=False, indent=2), encoding="utf-8")
         return card
+
+    def update_card(self, key: str, patch: dict[str, Any]) -> dict[str, Any] | None:
+        rows = self.cards()
+        for index, row in enumerate(rows):
+            if row.get("id") == key or row.get("source_url") == key:
+                merged = dict(row)
+                merged.update(patch)
+                rows[index] = merged
+                self.cards_path.write_text(json.dumps(rows[:200], ensure_ascii=False, indent=2), encoding="utf-8")
+                return merged
+        return None
 
     def save_feeds(self, work: list[dict], personal: list[dict] | None = None, **extra: list[dict]) -> None:
         intel = extra.get("intel", work)

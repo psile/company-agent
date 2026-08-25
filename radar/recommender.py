@@ -71,6 +71,7 @@ def rank_for_you(items: list[dict[str, Any]], ctx: dict[str, Any]) -> list[dict[
         row["matched"] = parts["matched"]
         row["why_you"] = _why(item, ctx, parts)
         row["project_value"] = _project_hint(item, ctx, parts)
+        row["channel"] = "work" if parts["project"] >= 0.5 else "personal"
         ranked.append(row)
     ranked.sort(key=lambda row: -row["score"])
     return ranked

@@ -11,7 +11,13 @@ from .store import LocalMemory, _read_json, _write_json
 
 DEFAULT_PROFILE = {
     "user_id": "me",
+    "display_name": "张伟",
     "role": "AI算法工程师",
+    "bio": "关注大模型应用与推荐系统，持续把前沿能力落到个人工作秘书里。",
+    "team": "算法平台",
+    "timezone": "GMT +8",
+    "languages": "中文 / English",
+    "joined": "2024-03-18",
     "domains": ["Agent", "Multimodal AI"],
     "preferred_content": ["论文", "技术博客", "开源项目"],
 }
@@ -21,6 +27,8 @@ DEFAULT_INTERESTS = [
     {"topic": "Memory Skill", "weight": 0.86, "last_active": "", "source": ["seed"]},
     {"topic": "Proactive Agent", "weight": 0.84, "last_active": "", "source": ["seed"]},
     {"topic": "Multimodal Agent", "weight": 0.73, "last_active": "", "source": ["seed"]},
+    {"topic": "AI Coding", "weight": 0.78, "last_active": "", "source": ["seed"]},
+    {"topic": "RAG", "weight": 0.70, "last_active": "", "source": ["seed"]},
     {"topic": "vLLM", "weight": 0.58, "last_active": "", "source": ["seed"]},
     {"topic": "World Model", "weight": 0.42, "last_active": "", "source": ["seed"]},
 ]
@@ -71,19 +79,73 @@ class UserMemory:
         }
 
     def profile(self) -> dict[str, Any]:
-        return _read_json(self.profile_path, dict(DEFAULT_PROFILE))
+        merged = dict(DEFAULT_PROFILE)
+        raw = _read_json(self.profile_path, {})
+        merged.update({key: value for key, value in raw.items() if value not in (None, "")})
+        return merged
 
     def interests(self) -> list[dict[str, Any]]:
         data = _read_json(self.interest_path, {"topics": list(DEFAULT_INTERESTS)})
         rows = data.get("topics") if isinstance(data, dict) else data
         return sorted(list(rows or []), key=lambda row: -float(row.get("weight") or 0))
 
+    def save_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
+        merged = dict(DEFAULT_PROFILE)
+        merged.update(self.profile())
+        merged.update(payload or {})
+        _write_json(self.profile_path, merged)
+        return merged
+
+    def add_interests(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        now = _now()
+        existing = {str(row.get("topic") or "").lower(): dict(row) for row in self.interests() if row.get("topic")}
+        for row in rows:
+            topic = str(row.get("topic") or "").strip()
+            if not topic:
+                continue
+            key = topic.lower()
+            current = existing.get(key) or {"topic": topic, "weight": 0.4, "source": []}
+            weight = max(float(current.get("weight") or 0.4), float(row.get("weight") or 0.8))
+            sources = list(current.get("source") or [])
+            for src in row.get("source") or ["follow"]:
+                if src not in sources:
+                    sources.append(src)
+            current.update(
+                {
+                    "topic": topic,
+                    "weight": round(min(0.99, weight), 3),
+                    "last_active": now,
+                    "source": sources[-8:],
+                }
+            )
+            existing[key] = current
+        return self.save_interests(list(existing.values()))
+
+    def save_interests(self, topics: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        ranked = sorted(topics, key=lambda row: -float(row.get("weight") or 0))[:40]
+        _write_json(self.interest_path, {"topics": ranked})
+        self._sync_keyword_ledger()
+        return ranked
+
     def project(self) -> dict[str, Any]:
         return _read_json(self.project_path, dict(DEFAULT_PROJECT))
+
+    def save_project(self, payload: dict[str, Any]) -> dict[str, Any]:
+        merged = dict(DEFAULT_PROJECT)
+        merged.update(self.project())
+        merged.update(payload or {})
+        _write_json(self.project_path, merged)
+        return merged
 
     def behavior(self) -> dict[str, Any]:
         merged = dict(DEFAULT_BEHAVIOR)
         merged.update(_read_json(self.behavior_path, {}))
+        return merged
+
+    def save_behavior(self, payload: dict[str, Any]) -> dict[str, Any]:
+        merged = self.behavior()
+        merged.update(payload or {})
+        _write_json(self.behavior_path, merged)
         return merged
 
     def snapshot(self) -> dict[str, Any]:
