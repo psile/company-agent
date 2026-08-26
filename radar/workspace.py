@@ -87,19 +87,24 @@ KNOWN_TOPICS = [
     "Proactive Agent",
     "AI Coding",
     "RAG",
+    "Mem0",
+    "Long-term Memory",
     "World Model",
+    "Autonomous Driving",
+    "VLM",
+    "Intelligent Cockpit",
     "Multimodal Agent",
     "vLLM",
 ]
 
 
 class Workspace:
-    def __init__(self, data_dir: Path) -> None:
+    def __init__(self, data_dir: Path, observe_path: Path | None = None) -> None:
         self.root = data_dir
         self.goals_path = data_dir / "goals.json"
         self.products_path = data_dir / "products.json"
         self.push_path = data_dir / "push_settings.json"
-        self.observe_path = data_dir / "observe.json"
+        self.observe_path = observe_path or (data_dir / "observe.json")
         if not self.goals_path.exists():
             _write_json(self.goals_path, {"items": list(DEFAULT_GOALS)})
         if not self.products_path.exists():
@@ -162,6 +167,10 @@ def classify_knowledge(item: dict[str, Any]) -> str:
             " ".join(item.get("tags") or []),
         ]
     ).lower()
+    if any(word in blob for word in ("world model", "autonomous driving", "occupancy", "自动驾驶")):
+        return "Autonomous Driving"
+    if any(word in blob for word in ("vlm", "cockpit", "座舱")):
+        return "VLM"
     if any(word in blob for word in ("memory", "mem0", "记忆")):
         return "Agent Memory"
     if any(word in blob for word in ("personal agent", "secretary", "秘书")):

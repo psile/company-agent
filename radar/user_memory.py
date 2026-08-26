@@ -71,8 +71,10 @@ class UserMemory:
             _write_json(self.behavior_path, dict(DEFAULT_BEHAVIOR))
 
     def context(self) -> dict[str, Any]:
+        profile = self.profile()
         return {
-            "profile": self.profile(),
+            "user_id": profile.get("user_id") or self.local.profile().get("user_id") or "",
+            "profile": profile,
             "interests": self.interests(),
             "project": self.project(),
             "behavior": self.behavior(),
@@ -230,7 +232,20 @@ def _topics_from_item(item: dict[str, Any]) -> list[str]:
             if text:
                 bag.append(text)
     title = str(item.get("title") or "")
-    for token in ("Memory", "Agent", "vLLM", "RAG", "LLM", "Skill"):
+    for token in (
+        "Memory",
+        "Agent",
+        "vLLM",
+        "RAG",
+        "LLM",
+        "Skill",
+        "Mem0",
+        "World Model",
+        "VLM",
+        "Driving",
+        "Cockpit",
+        "Occupancy",
+    ):
         if token.lower() in title.lower():
             bag.append(token)
     seen: set[str] = set()

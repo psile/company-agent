@@ -88,6 +88,37 @@ button { cursor: pointer; }
   padding: 2px 6px;
 }
 .top-actions { display: flex; align-items: center; gap: 12px; }
+.userchip .btn-ghost { padding: 4px 10px; font-size: 12px; }
+.auth-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(180deg, #eef2ff, #f4f6fb);
+}
+.auth-gate[hidden] { display: none; }
+.auth-card {
+  width: min(420px, calc(100% - 32px));
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 28px 24px;
+}
+.auth-card .brand { margin-bottom: 18px; }
+.auth-card h1 { margin: 0 0 8px; font-size: 22px; }
+.auth-lead { color: var(--muted); margin: 0 0 18px; }
+.auth-error { color: var(--danger); margin: 0 0 12px; }
+.auth-card .btn { width: 100%; margin-top: 8px; }
+.auth-card .hint { text-align: center; }
+.linkish {
+  border: 0;
+  background: none;
+  color: var(--brand);
+  padding: 0;
+}
+.auth-demo { margin-top: 8px; text-align: center; }
 .icon-btn {
   position: relative;
   width: 38px;
@@ -186,12 +217,13 @@ button { cursor: pointer; }
 .nav-main, .nav-account { display: grid; gap: 2px; }
 .nav-account { margin-top: 18px; padding-top: 10px; border-top: 1px solid var(--line); }
 .nav-sub {
-  display: grid;
+  display: none;
   gap: 1px;
   margin: 2px 0 6px 14px;
   padding-left: 10px;
   border-left: 1px solid var(--line);
 }
+.nav-sub.is-open { display: grid; }
 .nav-sub a {
   display: block;
   padding: 7px 10px;

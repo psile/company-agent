@@ -25,7 +25,7 @@ const SETTINGS_ITEMS = [
   { href: "#/settings/privacy", label: "数据与隐私" },
   { href: "#/settings/members", label: "成员与权限" },
 ];
-const CATS = ["Agent Memory", "Personal Agent", "AI Coding", "工具实践", "产品动态", "待整理"];
+const CATS = ["Agent Memory", "Personal Agent", "Autonomous Driving", "VLM", "AI Coding", "工具实践", "产品动态", "待整理"];
 const EXAMPLES = [
   "最近帮我重点关注 Agent Memory 和 Memory Skill。",
   "持续跟踪 Codex 和 Claude Code 的最新进展。",
@@ -40,6 +40,9 @@ const FOLLOW_TABS = [
 
 const state = {
   dash: null,
+  userId: "",
+  token: localStorage.getItem("radar_session") || "",
+  registerMode: false,
   route: "/",
   recTab: "work",
   recFilter: "all",
@@ -53,13 +56,44 @@ const state = {
 const $ = (id) => document.getElementById(id);
 
 async function api(path, options = {}) {
-  const res = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
-  const data = await res.json();
+  const { headers: extraHeaders, ...rest } = options;
+  const headers = {
+    "Content-Type": "application/json",
+    ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
+    ...(extraHeaders || {}),
+  };
+  const res = await fetch(path, { credentials: "same-origin", ...rest, headers });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && path !== "/api/me") {
+    showAuth();
+  }
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
+}
+
+function showAuth() {
+  state.dash = null;
+  state.userId = "";
+  if ($("appShell")) $("appShell").hidden = true;
+  if ($("authGate")) $("authGate").hidden = false;
+}
+
+function hideAuth() {
+  if ($("authGate")) $("authGate").hidden = true;
+  if ($("appShell")) $("appShell").hidden = false;
+}
+
+function setAuthMode(register) {
+  state.registerMode = register;
+  $("authTitle").textContent = register ? "创建账户" : "登录";
+  $("authLead").textContent = register
+    ? "创建后立刻进入你自己的工作台。飞书接口可以稍后在账号设置里填写。"
+    : "每个账号有一份私有 Memory。飞书 App ID / Secret 在登录后的「账号与安全」里填写。";
+  $("nameField").hidden = !register;
+  $("authSubmit").textContent = register ? "创建并进入" : "登录";
+  $("authSwitch").textContent = register ? "已有账号？去登录" : "没有账号？创建账户";
+  $("authPass").autocomplete = register ? "new-password" : "current-password";
+  $("authError").hidden = true;
 }
 
 function toast(text) {
@@ -78,6 +112,11 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function nameFromUser() {
+  const account = (state.dash && state.dash.account && state.dash.account.user) || {};
+  return account.display_name || account.username || state.userId || "我";
 }
 
 function greeting() {
@@ -178,9 +217,10 @@ function navHtml(items) {
 }
 
 function settingsNavHtml() {
+  const open = String(state.route || "").startsWith("/settings");
   return `
-    <a class="nav-parent" href="#/settings/push">${ICONS.gear}<span>设置</span></a>
-    <div class="nav-sub">${SETTINGS_ITEMS.map((item) => `<a class="${isActive(item.href) ? "is-on" : ""}" href="${item.href}">${escapeHtml(item.label)}</a>`).join("")}</div>`;
+    <a class="nav-parent${open ? " is-on" : ""}" href="${open ? `#${state.route}` : "#/settings/push"}">${ICONS.gear}<span>设置</span><span class="chevron" aria-hidden="true">${open ? "▾" : "▸"}</span></a>
+    <div class="nav-sub${open ? " is-open" : ""}">${SETTINGS_ITEMS.map((item) => `<a class="${isActive(item.href) ? "is-on" : ""}" href="${item.href}">${escapeHtml(item.label)}</a>`).join("")}</div>`;
 }
 
 function renderChrome() {
@@ -188,7 +228,7 @@ function renderChrome() {
   const dash = state.dash || {};
   const profile = dash.profile || {};
   const observe = dash.observe || {};
-  const name = profile.display_name || "张伟";
+  const name = profile.display_name || nameFromUser();
   $("userName").textContent = name;
   $("avatar").textContent = name.slice(0, 1);
   $("mainNav").innerHTML = navHtml(ROUTES);
@@ -202,11 +242,11 @@ function renderChrome() {
     <p>已处理信息 <b>${total.toLocaleString()}</b> 条</p>
     <div class="bar"><span style="width:${Math.min(100, 18 + (total % 80))}%"></span></div>
     <p>今日新增 ${fetched} 条</p>`;
-  const events = dash.events || [];
-  $("noticeBadge").hidden = events.length === 0;
-  $("noticeBadge").textContent = String(Math.min(9, events.length));
-  $("noticePop").innerHTML = events.length
-    ? events.slice(0, 6).map((ev) => `<p>${escapeHtml(ev.title || ev.action || "新动态")} · ${escapeHtml(fmtTime(ev.at))}</p>`).join("")
+  const notices = dash.notifications || dash.events || [];
+  $("noticeBadge").hidden = notices.length === 0;
+  $("noticeBadge").textContent = String(Math.min(9, notices.length));
+  $("noticePop").innerHTML = notices.length
+    ? notices.slice(0, 6).map((ev) => `<p>${escapeHtml(ev.title || ev.content || ev.action || "新动态")} · ${escapeHtml(fmtTime(ev.created_at || ev.at))}</p>`).join("")
     : "<p>暂无新通知。高相关内容会先出现在这里，再按设置推到飞书。</p>";
 }
 
@@ -577,7 +617,7 @@ function pageProfile() {
         <div class="userchip" style="gap:14px">
           <span class="avatar" style="width:48px;height:48px;font-size:18px">${escapeHtml((profile.display_name||"张").slice(0,1))}</span>
           <div>
-            <b>${escapeHtml(profile.display_name || "张伟")}</b>
+            <b>${escapeHtml(profile.display_name || nameFromUser())}</b>
             <div class="tiny">${escapeHtml(profile.role || "")} · ${escapeHtml(profile.team || "")}</div>
             <p>${escapeHtml(profile.bio || "")}</p>
           </div>
@@ -719,7 +759,7 @@ function pageSettingsProfile() {
       </div>
     </div>
     <section class="card" style="max-width:640px">
-      <div class="field"><label>姓名</label><input id="pName" value="${escapeHtml(profile.display_name || "张伟")}" /></div>
+      <div class="field"><label>姓名</label><input id="pName" value="${escapeHtml(profile.display_name || nameFromUser())}" /></div>
       <div class="field"><label>岗位</label><input id="pRole" value="${escapeHtml(profile.role || "")}" /></div>
       <div class="field"><label>团队</label><input id="pTeam" value="${escapeHtml(profile.team || "")}" /></div>
       <div class="field"><label>简介</label><textarea id="pBio">${escapeHtml(profile.bio || "")}</textarea></div>
@@ -730,17 +770,37 @@ function pageSettingsProfile() {
 }
 
 function pageSettingsSecurity() {
+  const account = (state.dash.account && state.dash.account.user) || {};
+  const feishu = (state.dash.account && state.dash.account.feishu) || {};
   return `
     <div class="page-head">
       <div>
         <h1>账号与安全</h1>
-        <p>当前 Demo 为单人本地工作台，登录与密钥不经过这套页面。</p>
+        <p>登录账号只属于你。飞书 App ID / Secret 写在这里，推送时用你的应用，不会用别人的。</p>
       </div>
     </div>
     <section class="card" style="max-width:640px">
-      <div class="toggle"><div><b>飞书绑定</b><div class="tiny">用于一对一主动推送。密钥写在本地 .env，不会进仓库。</div></div><span class="tag green">已预留</span></div>
-      <div class="toggle"><div><b>Web 会话</b><div class="tiny">本机工作台，无需额外登录。</div></div><span class="tag">本地</span></div>
-      <div class="toggle"><div><b>两步验证</b><div class="tiny">团队版再接入。</div></div><span class="tag">即将推出</span></div>
+      <h2>登录账号</h2>
+      <div class="field"><label>用户名</label><input value="${escapeHtml(account.username || state.userId)}" disabled /></div>
+      <div class="field"><label>当前密码</label><input id="oldPass" type="password" autocomplete="current-password" /></div>
+      <div class="field"><label>新密码</label><input id="newPass" type="password" autocomplete="new-password" /></div>
+      <button class="btn" id="savePassBtn" type="button">更新密码</button>
+    </section>
+    <section class="card" style="max-width:640px;margin-top:16px">
+      <h2>飞书应用</h2>
+      <p class="tiny">在飞书开放平台创建企业自建应用后，把 App ID 和 App Secret 填在下面。Secret 只保存在本机该用户目录，接口不会再读出来。</p>
+      <div class="field"><label>App ID</label><input id="fsAppId" value="${escapeHtml(feishu.app_id || "")}" placeholder="cli_xxx" /></div>
+      <div class="field"><label>App Secret</label><input id="fsAppSecret" type="password" placeholder="${feishu.app_secret_set ? "已保存，留空则不修改" : "填写 App Secret"}" /></div>
+      <div class="field"><label>接收人类型</label>
+        <select id="fsReceiveType">
+          <option value="email"${(feishu.receive_id_type || "email") === "email" ? " selected" : ""}>邮箱</option>
+          <option value="open_id"${feishu.receive_id_type === "open_id" ? " selected" : ""}>open_id</option>
+        </select>
+      </div>
+      <div class="field"><label>接收人 ID / 邮箱</label><input id="fsReceiveId" value="${escapeHtml(feishu.receive_id || "")}" placeholder="you@example.com 或 ou_xxx" /></div>
+      <div class="field"><label>手机号（可选，用来换 open_id）</label><input id="fsMobile" value="${escapeHtml(feishu.receive_mobile || "")}" /></div>
+      <p class="tiny">${feishu.ready ? "当前账号的飞书通道已就绪，高相关内容会推到这个接收人。" : "还差 App ID、Secret 和接收人。未配好时只写站内通知。"}</p>
+      <button class="btn" id="saveFeishuBtn" type="button">保存飞书设置</button>
     </section>`;
 }
 
@@ -792,7 +852,7 @@ function pageSettingsPrivacy() {
 }
 
 function pageSettingsMembers() {
-  const name = (state.dash.profile || {}).display_name || "张伟";
+  const name = (state.dash.profile || {}).display_name || nameFromUser();
   return `
     <div class="page-head">
       <div>
@@ -847,7 +907,29 @@ function render() {
 
 async function load() {
   state.dash = await api("/api/dashboard");
+  state.userId = state.dash.current_user || state.userId;
+  hideAuth();
   render();
+}
+
+async function enterSession(session) {
+  state.token = session.token || state.token;
+  if (state.token) localStorage.setItem("radar_session", state.token);
+  state.userId = (session.user && session.user.id) || state.userId;
+  hideAuth();
+  await load();
+}
+
+async function boot() {
+  try {
+    const me = await api("/api/me");
+    state.userId = (me.user && me.user.id) || "";
+    hideAuth();
+    await load();
+  } catch {
+    showAuth();
+    setAuthMode(false);
+  }
 }
 
 async function act(id, action) {
@@ -873,10 +955,19 @@ async function refreshFeeds(btn) {
 }
 
 document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-act],[data-open],[data-rectab],[data-filter],[data-cat],[data-card],[data-topic],[data-example],[data-toggle],[data-move],[data-followkind],#refreshBtn,#refreshBtn2,#followBtn,#addGoalBtn,#savePrefBtn,#savePushBtn,#pushNowBtn,#briefBtn,#noticeBtn,#saveProfileBtn,#exportBtn,#addProductBtn,#addSourceBtn,#addFollowGoalBtn");
+  const t = event.target.closest("[data-act],[data-open],[data-rectab],[data-filter],[data-cat],[data-card],[data-topic],[data-example],[data-toggle],[data-move],[data-followkind],#refreshBtn,#refreshBtn2,#followBtn,#addGoalBtn,#savePrefBtn,#savePushBtn,#pushNowBtn,#briefBtn,#noticeBtn,#saveProfileBtn,#exportBtn,#addProductBtn,#addSourceBtn,#addFollowGoalBtn,#logoutBtn,#savePassBtn,#saveFeishuBtn");
   if (!t) return;
   if (t.id === "noticeBtn") {
     $("noticePop").hidden = !$("noticePop").hidden;
+    return;
+  }
+  if (t.id === "logoutBtn") {
+    await api("/api/auth/logout", { method: "POST", body: "{}" }).catch(() => {});
+    state.token = "";
+    localStorage.removeItem("radar_session");
+    showAuth();
+    setAuthMode(false);
+    toast("已退出");
     return;
   }
   if (t.id === "refreshBtn" || t.id === "refreshBtn2" || t.id === "briefBtn") return refreshFeeds(t);
@@ -956,6 +1047,36 @@ document.addEventListener("click", async (event) => {
     toast("已更新 Profile Memory。");
     return load();
   }
+  if (t.id === "savePassBtn") {
+    try {
+      await api("/api/account/password", { method: "PUT", body: JSON.stringify({
+        old_password: $("oldPass").value,
+        new_password: $("newPass").value,
+      }) });
+      toast("密码已更新。");
+      $("oldPass").value = "";
+      $("newPass").value = "";
+    } catch (err) {
+      toast(err.message || "更新密码失败");
+    }
+    return;
+  }
+  if (t.id === "saveFeishuBtn") {
+    try {
+      const out = await api("/api/account/feishu", { method: "PUT", body: JSON.stringify({
+        app_id: $("fsAppId").value,
+        app_secret: $("fsAppSecret").value,
+        receive_id_type: $("fsReceiveType").value,
+        receive_id: $("fsReceiveId").value,
+        receive_mobile: $("fsMobile").value,
+      }) });
+      toast(out.ready ? "飞书设置已保存，通道已就绪。" : "已保存。还需要 App ID、Secret 和接收人才能真正推送。");
+      return load();
+    } catch (err) {
+      toast(err.message || "保存飞书设置失败");
+      return;
+    }
+  }
   if (t.id === "exportBtn") {
     const blob = new Blob([JSON.stringify(state.dash, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
@@ -1033,9 +1154,27 @@ document.addEventListener("click", (event) => {
 
 window.addEventListener("hashchange", render);
 
-state.route = currentRoute();
-renderChrome();
-load().catch((err) => {
-  renderChrome();
-  $("page").innerHTML = `<div class="empty">工作台加载失败：${escapeHtml(err.message)}</div>`;
+$("authSwitch")?.addEventListener("click", () => setAuthMode(!state.registerMode));
+$("authForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const error = $("authError");
+  error.hidden = true;
+  const username = $("authUser").value.trim();
+  const password = $("authPass").value;
+  const display_name = $("regName").value.trim();
+  try {
+    const path = state.registerMode ? "/api/auth/register" : "/api/auth/login";
+    const session = await api(path, {
+      method: "POST",
+      body: JSON.stringify({ username, password, display_name }),
+    });
+    await enterSession(session);
+    toast(state.registerMode ? "账号已创建。" : `欢迎回来，${session.user.display_name || session.user.username}`);
+  } catch (err) {
+    error.textContent = err.message || "登录失败";
+    error.hidden = false;
+  }
 });
+
+state.route = currentRoute();
+boot();

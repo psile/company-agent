@@ -22,7 +22,7 @@ class HierarchicalMemory:
     def __init__(self, data_dir: Path, local: LocalMemory) -> None:
         self.local = local
         self.root = data_dir / "memoryos"
-        self.user_dir = self.root / "users" / local.profile().get("user_id", "me")
+        self.user_dir = self.root
         self.user_dir.mkdir(parents=True, exist_ok=True)
         self.short_path = self.user_dir / "short_term.json"
         self.mid_path = self.user_dir / "mid_term.json"

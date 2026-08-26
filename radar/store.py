@@ -152,3 +152,39 @@ def _uniq(values: list) -> list[str]:
 
 def _item_id(url: str) -> str:
     return hashlib.sha1(url.encode("utf-8")).hexdigest()[:12]
+
+
+class ContentPool:
+    """全局候选池：采集一次，所有用户从这里取内容再各自排序。"""
+
+    def __init__(self, pool_dir: Path) -> None:
+        from .seeds import DEMO_ITEMS
+
+        self.root = pool_dir
+        self.items_path = pool_dir / "items.json"
+        self.root.mkdir(parents=True, exist_ok=True)
+        if not self.items_path.exists():
+            _write_json(self.items_path, {"items": list(DEMO_ITEMS)})
+
+    def items(self) -> list[dict[str, Any]]:
+        return list(_read_json(self.items_path, {"items": []}).get("items") or [])
+
+    def merge(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        by_id: dict[str, dict[str, Any]] = {}
+        for row in self.items():
+            if row.get("id"):
+                by_id[str(row["id"])] = dict(row)
+        for row in rows:
+            item_id = str(row.get("id") or "")
+            if not item_id:
+                continue
+            by_id[item_id] = {**by_id.get(item_id, {}), **row}
+        items = list(by_id.values())
+        _write_json(self.items_path, {"items": items})
+        return items
+
+    def find(self, item_id: str) -> dict[str, Any] | None:
+        for row in self.items():
+            if row.get("id") == item_id or row.get("source_url") == item_id:
+                return row
+        return None

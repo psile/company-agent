@@ -46,17 +46,17 @@ def format_push(item: dict | ScoredItem) -> str:
     return "\n".join(line for line in lines if line)
 
 
-def push_text(text: str) -> dict:
+def push_text(text: str, app: dict | None = None) -> dict:
     load_env()
     if get_bool("RADAR_PUSH_DRY_RUN", False):
         return {"ok": False, "reason": "RADAR_PUSH_DRY_RUN enabled", "text": text}
-    app = _app_config()
-    if app["ready"]:
-        return push_app_text(text, app)
-    url = (os.environ.get("FEISHU_WEBHOOK_URL") or "").strip()
+    cfg = app or _app_config()
+    if cfg.get("ready"):
+        return push_app_text(text, cfg)
+    url = (cfg.get("webhook_url") or os.environ.get("FEISHU_WEBHOOK_URL") or "").strip()
     if not url:
         return {"ok": False, "reason": "Feishu app bot/webhook not configured", "text": text}
-    return push_webhook_text(text, url)
+    return push_webhook_text(text, url, secret=cfg.get("webhook_secret") or None)
 
 
 def feishu_status() -> dict[str, Any]:
@@ -103,17 +103,17 @@ def push_app_text(text: str, app: dict[str, str] | None = None) -> dict:
     return result
 
 
-def push_webhook_text(text: str, url: str | None = None) -> dict:
+def push_webhook_text(text: str, url: str | None = None, secret: str | None = None) -> dict:
     load_env()
     webhook = (url or os.environ.get("FEISHU_WEBHOOK_URL") or "").strip()
     if not webhook:
         return {"ok": False, "reason": "FEISHU_WEBHOOK_URL not set", "text": text}
     payload = {"msg_type": "text", "content": {"text": text}}
-    secret = (os.environ.get("FEISHU_SECRET") or "").strip()
-    if secret:
+    sign_secret = (secret if secret is not None else os.environ.get("FEISHU_SECRET") or "").strip()
+    if sign_secret:
         timestamp = str(int(time.time()))
         payload["timestamp"] = timestamp
-        payload["sign"] = _sign(timestamp, secret)
+        payload["sign"] = _sign(timestamp, sign_secret)
     result = _post_json(webhook, payload)
     result["channel"] = "webhook"
     result["text"] = text
@@ -127,14 +127,36 @@ def _sign(timestamp: str, secret: str) -> str:
 
 
 def _app_config() -> dict[str, Any]:
+    return app_config_from(None, use_env=True)
+
+
+def app_config_from(overrides: dict[str, Any] | None = None, use_env: bool = True) -> dict[str, Any]:
     load_env()
     cfg = {
-        "app_id": (os.environ.get("FEISHU_APP_ID") or "").strip(),
-        "app_secret": (os.environ.get("FEISHU_APP_SECRET") or "").strip(),
-        "receive_id_type": (os.environ.get("FEISHU_RECEIVE_ID_TYPE") or "email").strip(),
-        "receive_id": (os.environ.get("FEISHU_RECEIVE_ID") or "").strip(),
-        "receive_mobile": (os.environ.get("FEISHU_RECEIVE_MOBILE") or "").strip(),
+        "app_id": "",
+        "app_secret": "",
+        "receive_id_type": "email",
+        "receive_id": "",
+        "receive_mobile": "",
+        "webhook_url": "",
+        "webhook_secret": "",
     }
+    if use_env:
+        cfg.update(
+            {
+                "app_id": (os.environ.get("FEISHU_APP_ID") or "").strip(),
+                "app_secret": (os.environ.get("FEISHU_APP_SECRET") or "").strip(),
+                "receive_id_type": (os.environ.get("FEISHU_RECEIVE_ID_TYPE") or "email").strip() or "email",
+                "receive_id": (os.environ.get("FEISHU_RECEIVE_ID") or "").strip(),
+                "receive_mobile": (os.environ.get("FEISHU_RECEIVE_MOBILE") or "").strip(),
+                "webhook_url": (os.environ.get("FEISHU_WEBHOOK_URL") or "").strip(),
+                "webhook_secret": (os.environ.get("FEISHU_SECRET") or "").strip(),
+            }
+        )
+    for key in ("app_id", "app_secret", "receive_id_type", "receive_id", "receive_mobile", "webhook_url", "webhook_secret"):
+        value = str((overrides or {}).get(key) or "").strip()
+        if value:
+            cfg[key] = value
     missing = [key for key in ("app_id", "app_secret") if not cfg[key]]
     if not cfg["receive_id"] and not cfg["receive_mobile"]:
         missing.append("receive_id or receive_mobile")

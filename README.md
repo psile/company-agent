@@ -86,6 +86,8 @@ python -m radar serve
 
 浏览器：http://127.0.0.1:8765/
 
+打开后先登录。可创建自己的账号，或试用 `alice / alice123`、`bob / bob123`。每个账号有一份私有 Memory。飞书 App ID / Secret 写在 **设置 → 账号与安全**，只作用于当前用户。
+
 首页数字在尚未采集时可能是占位。点 **刷新源** 后走完整链路：采集 → 理解 → 记忆匹配 → 为你排序。
 
 ```powershell
@@ -126,6 +128,7 @@ copy env.example .env
 | `FEISHU_RECEIVE_ID_TYPE` | 接收人类型 | `email` 或 `open_id` |
 | `FEISHU_RECEIVE_ID` | 接收人 ID / 邮箱 | |
 | `FEISHU_RECEIVE_MOBILE` | 手机号登录时换 open_id | |
+| `FEISHU_MODE` | 飞书通道：`mock` 只写站内通知；`developer` 才走真实飞书 | 默认 `mock` |
 | `FEISHU_WEBHOOK_URL` | 群自定义机器人 webhook | 一对一应用机器人优先时可不填 |
 | `FEISHU_SECRET` | 群机器人签名密钥 | 未开签名则留空 |
 | `RADAR_HOST` | HTTP 监听地址 | `127.0.0.1` 或 `0.0.0.0` |

@@ -57,11 +57,11 @@ def rank_for_you(items: list[dict[str, Any]], ctx: dict[str, Any]) -> list[dict[
     for item in items:
         parts = score_parts(item, ctx)
         total = (
-            0.20 * parts["semantic"]
-            + 0.25 * parts["interest"]
-            + 0.25 * parts["project"]
-            + 0.10 * parts["fresh"]
-            + 0.12 * parts["quality"]
+            0.11 * parts["semantic"]
+            + 0.36 * parts["interest"]
+            + 0.23 * parts["project"]
+            + 0.12 * parts["fresh"]
+            + 0.10 * parts["quality"]
             + 0.08 * parts["feedback"]
         )
         row = dict(item)

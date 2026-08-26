@@ -7,7 +7,33 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <div class="app">
+  <div class="auth-gate" id="authGate">
+    <form class="auth-card" id="authForm">
+      <div class="brand">
+        <span class="logo" aria-hidden="true">A</span>
+        <span>个人工作秘书 Agent</span>
+      </div>
+      <h1 id="authTitle">登录</h1>
+      <p class="auth-lead" id="authLead">每个账号有一份私有 Memory。飞书 App ID / Secret 在登录后的「账号与安全」里填写。</p>
+      <div class="field" id="nameField" hidden>
+        <label>显示名</label>
+        <input id="regName" autocomplete="name" />
+      </div>
+      <div class="field">
+        <label>用户名</label>
+        <input id="authUser" autocomplete="username" required />
+      </div>
+      <div class="field">
+        <label>密码</label>
+        <input id="authPass" type="password" autocomplete="current-password" required />
+      </div>
+      <p class="auth-error" id="authError" hidden></p>
+      <button class="btn" id="authSubmit" type="submit">登录</button>
+      <p class="hint"><button class="linkish" id="authSwitch" type="button">没有账号？创建账户</button></p>
+      <p class="tiny auth-demo">试用：alice / alice123　或　bob / bob123</p>
+    </form>
+  </div>
+  <div class="app" id="appShell" hidden>
     <header class="topbar">
       <a class="brand" href="#/">
         <span class="logo" aria-hidden="true">A</span>
@@ -23,8 +49,9 @@
           <span class="badge" id="noticeBadge">2</span>
         </button>
         <div class="userchip">
-          <span class="avatar" id="avatar">张</span>
-          <span id="userName">张伟</span>
+          <span class="avatar" id="avatar">A</span>
+          <span id="userName">未登录</span>
+          <button class="btn-ghost" id="logoutBtn" type="button">退出</button>
         </div>
       </div>
       <div class="notice-pop" id="noticePop" hidden></div>
@@ -42,7 +69,7 @@
         </nav>
         <nav class="nav-account" id="accountNav">
           <a class="nav-link" href="#/profile"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 19a7 7 0 0 1 14 0"/></svg>个人中心</a>
-          <a class="nav-parent" href="#/settings/push"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3v2.2M4.7 7.2l1.9 1.1M17.4 15.7l1.9 1.1M4.7 16.8l1.9-1.1M17.4 8.3l1.9-1.1"/></svg><span>设置</span></a>
+          <a class="nav-parent" href="#/settings/push"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3v2.2M4.7 7.2l1.9 1.1M17.4 15.7l1.9 1.1M4.7 16.8l1.9-1.1M17.4 8.3l1.9-1.1"/></svg><span>设置</span><span class="chevron" aria-hidden="true">▸</span></a>
           <div class="nav-sub">
             <a href="#/settings/profile">个人信息</a>
             <a href="#/settings/security">账号与安全</a>

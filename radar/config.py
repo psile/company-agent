@@ -30,6 +30,14 @@ def get_bool(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def get_str(name: str, default: str = "") -> str:
+    load_env()
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip() or default
+
+
 def get_int(name: str, default: int) -> int:
     load_env()
     try:
