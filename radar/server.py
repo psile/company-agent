@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import threading
@@ -72,6 +73,13 @@ def make_handler(service: RadarService):
                     return self._json(200, service.dashboard(self._user()))
                 if path == "/api/account/feishu":
                     return self._json(200, service.feishu_settings(self._user()))
+                if path == "/api/conversations":
+                    return self._json(200, {"items": service.conversations(self._user())})
+                if path.startswith("/api/conversations/"):
+                    session_id = path.rsplit("/", 1)[-1]
+                    return self._json(200, service.conversation_detail(session_id, self._user()))
+                if path == "/api/conversation-profile":
+                    return self._json(200, service.conversation_profile(self._user()).get())
                 if path == "/api/notifications":
                     return self._json(200, {"items": service.for_user(self._user()).notify.list()})
                 if path == "/api/memory":
@@ -96,6 +104,8 @@ def make_handler(service: RadarService):
                 return self._json(401, {"error": "login required"})
             except ValueError as exc:
                 return self._json(400, {"error": str(exc)})
+            except KeyError:
+                return self._json(404, {"error": "conversation not found"})
             return super().do_GET()
 
         def do_PUT(self) -> None:
@@ -120,6 +130,8 @@ def make_handler(service: RadarService):
                     return self._json(200, service.save_push_settings(body or {}, user_id=user_id))
                 if path == "/api/account/feishu":
                     return self._json(200, service.save_feishu_settings(body or {}, user_id=user_id))
+                if path == "/api/conversation-profile":
+                    return self._json(200, service.save_conversation_profile(body or {}, user_id=user_id))
                 if path == "/api/account/password":
                     return self._json(
                         200,
@@ -174,6 +186,16 @@ def make_handler(service: RadarService):
                     return self._json(200, service.move_card(body.get("id") or body.get("source_url") or "", body.get("category") or "待整理", user_id=user_id))
                 if path == "/api/push/feishu":
                     return self._json(200, service.push_top_work(user_id=user_id))
+                if path == "/api/chat":
+                    body = self._read_json()
+                    out = asyncio.run(
+                        service.chat(
+                            body.get("message") or "",
+                            session_id=body.get("session_id") or None,
+                            user_id=user_id,
+                        )
+                    )
+                    return self._json(200, out)
             except PermissionError:
                 return self._json(401, {"error": "login required"})
             except ValueError as exc:

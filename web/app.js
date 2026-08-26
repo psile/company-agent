@@ -7,10 +7,12 @@ const ICONS = {
   box: '<svg viewBox="0 0 24 24"><path d="M4 8 12 4l8 4-8 4z"/><path d="M4 8v8l8 4 8-4V8"/><path d="M12 12v8"/></svg>',
   user: '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 19a7 7 0 0 1 14 0"/></svg>',
   gear: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3v2.2M4.7 7.2l1.9 1.1M17.4 15.7l1.9 1.1M4.7 16.8l1.9-1.1M17.4 8.3l1.9-1.1"/></svg>',
+  chat: '<svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H10l-5 4v-4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/><path d="M8 10h8M8 13h5"/></svg>',
 };
 
 const ROUTES = [
   { id: "home", href: "#/", label: "首页", icon: "home" },
+  { id: "chat", href: "#/chat", label: "秘书对话", icon: "chat" },
   { id: "recommend", href: "#/recommend", label: "为你推荐", icon: "star" },
   { id: "follows", href: "#/follows", label: "我的关注", icon: "heart" },
   { id: "goals", href: "#/goals", label: "目标管理", icon: "target" },
@@ -51,6 +53,11 @@ const state = {
   selectedCard: null,
   query: "",
   followKind: "topic",
+  chatSessions: [],
+  activeSessionId: null,
+  chatMessages: [],
+  conversationProfile: null,
+  chatBusy: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -248,6 +255,68 @@ function renderChrome() {
   $("noticePop").innerHTML = notices.length
     ? notices.slice(0, 6).map((ev) => `<p>${escapeHtml(ev.title || ev.content || ev.action || "新动态")} · ${escapeHtml(fmtTime(ev.created_at || ev.at))}</p>`).join("")
     : "<p>暂无新通知。高相关内容会先出现在这里，再按设置推到飞书。</p>";
+}
+
+function pageChat() {
+  const profile = state.conversationProfile || {};
+  const messages = state.chatMessages || [];
+  const sessions = state.chatSessions || [];
+  const messageHtml = messages.length
+    ? messages.map((message) => {
+        const actions = (message.metadata && message.metadata.actions) || [];
+        return `<div class="chat-message ${message.role === "user" ? "is-user" : "is-agent"}">
+          <div class="chat-role">${message.role === "user" ? "你" : "秘书 Agent"}</div>
+          <div class="chat-bubble">${escapeHtml(message.content).replaceAll("\n", "<br>")}</div>
+          ${actions.length ? `<div class="chat-actions">${actions.map((action) => `<span>${action.status === "success" ? "已完成" : "未完成"} · ${escapeHtml(action.summary || action.tool || "操作")}</span>`).join("")}</div>` : ""}
+        </div>`;
+      }).join("")
+    : `<div class="chat-empty"><h2>今天需要我做什么？</h2><p>直接告诉我你想关注的主题、最近在做的项目，或者询问最新推荐。</p>
+        <div class="chat-starters">
+          <button type="button" data-chat-example="最近帮我关注 Agent Memory、Mem0 和 MemOS，有重要论文再告诉我。">建立关注</button>
+          <button type="button" data-chat-example="最近 Agent Memory 有什么值得看的？">查询推荐</button>
+          <button type="button" data-chat-example="我最近主要在做个人 AI 秘书和 Agent Memory。">记住我的工作</button>
+        </div></div>`;
+  return `
+    <div class="page-head chat-page-head">
+      <div><h1>秘书对话</h1><p>持续对话，调用你的 Memory、目标、关注、知识库和 Radar。</p></div>
+      <button class="btn" id="newChatBtn" type="button">＋ 新建对话</button>
+    </div>
+    <div class="chat-workbench">
+      <aside class="chat-history">
+        <div class="panel-title">历史会话</div>
+        <div class="chat-session-list">${sessions.length ? sessions.map((session) => `<button type="button" data-chat-session="${escapeHtml(session.id)}" class="chat-session${session.id === state.activeSessionId ? " is-on" : ""}"><b>${escapeHtml(session.title || "新对话")}</b><span>${escapeHtml(fmtTime(session.updated_at))}</span></button>`).join("") : '<p class="tiny">还没有历史会话</p>'}</div>
+      </aside>
+      <section class="chat-main">
+        <div class="chat-messages" id="chatMessages">${messageHtml}${state.chatBusy ? '<div class="chat-message is-agent"><div class="chat-role">秘书 Agent</div><div class="chat-bubble is-thinking">正在理解并调用工具…</div></div>' : ""}</div>
+        <form class="chat-compose" id="chatForm">
+          <textarea id="chatInput" rows="3" placeholder="输入消息，Enter 发送，Shift + Enter 换行" ${state.chatBusy ? "disabled" : ""}></textarea>
+          <button class="btn chat-send" type="submit" ${state.chatBusy ? "disabled" : ""}>发送</button>
+        </form>
+      </section>
+      <aside class="chat-profile">
+        <div class="panel-title">对话偏好</div>
+        <div class="field"><label>回答长度</label><select id="cpVerbosity">
+          ${profileOptions([["concise","简洁"],["balanced","适中"],["detailed","详细"]], profile.verbosity)}
+        </select></div>
+        <div class="field"><label>回答方式</label><select id="cpAnswerStyle">
+          ${profileOptions([["conclusion_first","结论优先"],["step_by_step","逐步展开"]], profile.answer_style)}
+        </select></div>
+        <div class="field"><label>技术细节</label><select id="cpTechnical">
+          ${profileOptions([["low","少"],["medium","适中"],["high","详细"]], profile.technical_detail)}
+        </select></div>
+        <div class="field"><label>主动程度</label><select id="cpProactive">
+          ${profileOptions([["low","低"],["medium","中"],["high","高"]], profile.proactive_level)}
+        </select></div>
+        <div class="field"><label>操作确认</label><select id="cpConfirm">
+          ${profileOptions([["important_actions","重要操作确认"],["always","总是确认"],["never","无需确认"]], profile.confirmation_policy)}
+        </select></div>
+        <button class="btn-ghost" id="saveConversationProfileBtn" type="button">保存偏好</button>
+      </aside>
+    </div>`;
+}
+
+function profileOptions(items, selected) {
+  return items.map(([value, label]) => `<option value="${value}"${selected === value ? " selected" : ""}>${label}</option>`).join("");
 }
 
 function pageHome() {
@@ -799,8 +868,10 @@ function pageSettingsSecurity() {
       </div>
       <div class="field"><label>接收人 ID / 邮箱</label><input id="fsReceiveId" value="${escapeHtml(feishu.receive_id || "")}" placeholder="you@example.com 或 ou_xxx" /></div>
       <div class="field"><label>手机号（可选，用来换 open_id）</label><input id="fsMobile" value="${escapeHtml(feishu.receive_mobile || "")}" /></div>
-      <p class="tiny">${feishu.ready ? "当前账号的飞书通道已就绪，高相关内容会推到这个接收人。" : "还差 App ID、Secret 和接收人。未配好时只写站内通知。"}</p>
-      <button class="btn" id="saveFeishuBtn" type="button">保存飞书设置</button>
+      <p class="feishu-verify ${feishu.verification_status === "verified" ? "is-ok" : feishu.verification_status === "failed" ? "is-error" : ""}">
+        ${feishu.verification_status === "verified" ? "验证成功：" : feishu.verification_status === "failed" ? "验证失败：" : "尚未验证："}${escapeHtml(feishu.verification_message || "保存后将自动校验 App ID、Secret 和接收人")}
+      </p>
+      <button class="btn" id="saveFeishuBtn" type="button">保存并验证</button>
     </section>`;
 }
 
@@ -869,6 +940,7 @@ function pageSettingsMembers() {
 
 const PAGES = {
   "/": pageHome,
+  "/chat": pageChat,
   "/recommend": pageRecommend,
   "/follows": pageFollows,
   "/goals": pageGoals,
@@ -908,8 +980,27 @@ function render() {
 async function load() {
   state.dash = await api("/api/dashboard");
   state.userId = state.dash.current_user || state.userId;
+  if (state.route === "/chat" && !state.chatSessions.length) await loadChatState(true);
   hideAuth();
   render();
+}
+
+async function loadChatState(selectLatest = false) {
+  const [sessions, profile] = await Promise.all([
+    api("/api/conversations"),
+    api("/api/conversation-profile"),
+  ]);
+  state.chatSessions = sessions.items || [];
+  state.conversationProfile = profile;
+  if (!state.activeSessionId && selectLatest && state.chatSessions.length) {
+    state.activeSessionId = state.chatSessions[0].id;
+  }
+  if (state.activeSessionId) {
+    const detail = await api(`/api/conversations/${encodeURIComponent(state.activeSessionId)}`);
+    state.chatMessages = detail.messages || [];
+  } else {
+    state.chatMessages = [];
+  }
 }
 
 async function enterSession(session) {
@@ -955,8 +1046,39 @@ async function refreshFeeds(btn) {
 }
 
 document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-act],[data-open],[data-rectab],[data-filter],[data-cat],[data-card],[data-topic],[data-example],[data-toggle],[data-move],[data-followkind],#refreshBtn,#refreshBtn2,#followBtn,#addGoalBtn,#savePrefBtn,#savePushBtn,#pushNowBtn,#briefBtn,#noticeBtn,#saveProfileBtn,#exportBtn,#addProductBtn,#addSourceBtn,#addFollowGoalBtn,#logoutBtn,#savePassBtn,#saveFeishuBtn");
+  const t = event.target.closest("[data-act],[data-open],[data-rectab],[data-filter],[data-cat],[data-card],[data-topic],[data-example],[data-toggle],[data-move],[data-followkind],[data-chat-session],[data-chat-example],#newChatBtn,#saveConversationProfileBtn,#refreshBtn,#refreshBtn2,#followBtn,#addGoalBtn,#savePrefBtn,#savePushBtn,#pushNowBtn,#briefBtn,#noticeBtn,#saveProfileBtn,#exportBtn,#addProductBtn,#addSourceBtn,#addFollowGoalBtn,#logoutBtn,#savePassBtn,#saveFeishuBtn");
   if (!t) return;
+  if (t.dataset.chatSession) {
+    state.activeSessionId = t.dataset.chatSession;
+    const detail = await api(`/api/conversations/${encodeURIComponent(state.activeSessionId)}`);
+    state.chatMessages = detail.messages || [];
+    render();
+    return;
+  }
+  if (t.dataset.chatExample) {
+    if ($("chatInput")) $("chatInput").value = t.dataset.chatExample;
+    $("chatInput")?.focus();
+    return;
+  }
+  if (t.id === "newChatBtn") {
+    state.activeSessionId = null;
+    state.chatMessages = [];
+    render();
+    $("chatInput")?.focus();
+    return;
+  }
+  if (t.id === "saveConversationProfileBtn") {
+    state.conversationProfile = await api("/api/conversation-profile", { method: "PUT", body: JSON.stringify({
+      verbosity: $("cpVerbosity").value,
+      answer_style: $("cpAnswerStyle").value,
+      technical_detail: $("cpTechnical").value,
+      proactive_level: $("cpProactive").value,
+      confirmation_policy: $("cpConfirm").value,
+    }) });
+    toast("对话偏好已保存，下一条回复开始生效。");
+    render();
+    return;
+  }
   if (t.id === "noticeBtn") {
     $("noticePop").hidden = !$("noticePop").hidden;
     return;
@@ -1070,7 +1192,7 @@ document.addEventListener("click", async (event) => {
         receive_id: $("fsReceiveId").value,
         receive_mobile: $("fsMobile").value,
       }) });
-      toast(out.ready ? "飞书设置已保存，通道已就绪。" : "已保存。还需要 App ID、Secret 和接收人才能真正推送。");
+      toast(out.verification_status === "verified" ? "飞书设置已保存并验证成功。" : `设置已保存，但验证失败：${out.verification_message || "请检查配置"}`);
       return load();
     } catch (err) {
       toast(err.message || "保存飞书设置失败");
@@ -1139,7 +1261,41 @@ document.addEventListener("input", (event) => {
   }
 });
 
+document.addEventListener("submit", async (event) => {
+  if (event.target.id !== "chatForm") return;
+  event.preventDefault();
+  const input = $("chatInput");
+  const message = input?.value.trim() || "";
+  if (!message || state.chatBusy) return;
+  state.chatBusy = true;
+  state.chatMessages = [...state.chatMessages, { role: "user", content: message, metadata: {} }];
+  render();
+  try {
+    const out = await api("/api/chat", { method: "POST", body: JSON.stringify({
+      message,
+      session_id: state.activeSessionId,
+    }) });
+    state.activeSessionId = out.session_id;
+    await loadChatState(false);
+  } catch (err) {
+    toast(err.message || "对话失败，请稍后重试。");
+  } finally {
+    state.chatBusy = false;
+    render();
+    requestAnimationFrame(() => {
+      const box = $("chatMessages");
+      if (box) box.scrollTop = box.scrollHeight;
+      $("chatInput")?.focus();
+    });
+  }
+});
+
 document.addEventListener("keydown", (event) => {
+  if (event.target.id === "chatInput" && event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    event.target.form?.requestSubmit();
+    return;
+  }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
     event.preventDefault();
     $("searchInput").focus();
@@ -1152,7 +1308,11 @@ document.addEventListener("click", (event) => {
   }
 });
 
-window.addEventListener("hashchange", render);
+window.addEventListener("hashchange", async () => {
+  state.route = currentRoute();
+  if (state.route === "/chat") await loadChatState(true);
+  render();
+});
 
 $("authSwitch")?.addEventListener("click", () => setAuthMode(!state.registerMode));
 $("authForm")?.addEventListener("submit", async (event) => {

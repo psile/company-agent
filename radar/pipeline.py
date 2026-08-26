@@ -9,11 +9,13 @@ from pathlib import Path
 from . import ingest, intelligence, recommender
 from .channels import send_for_user
 from .config import get_bool, get_int, get_str, load_env
-from .feishu import format_push
+from .conversation import ConversationService
+from .feishu import format_push, validate_app_config
 from .identity import IdentityService
 from .memory_bridge import remember_fact
 from .memory_os import HierarchicalMemory
 from .notify import NotificationLog
+from .proactive import decide_proactive_notification
 from .seeds import bootstrap_new_user, bootstrap_user_dir, spec_by_id
 from .store import ContentPool, LocalMemory, _read_json, _write_json
 from .user_memory import UserMemory
@@ -51,6 +53,7 @@ class RadarService:
         self.user_memory = default.user_memory
         self.workspace = default.workspace
         self.hierarchy = default.hierarchy
+        self.conversation = ConversationService(self, self.root)
 
     def _ensure_demo(self) -> None:
         from .seeds import DEMO_PASSWORDS, DEMO_USERS
@@ -144,6 +147,22 @@ class RadarService:
             "feishu": self.feishu_settings(uid),
         }
 
+    async def chat(self, message: str, session_id: str | None = None, user_id: str | None = None) -> dict:
+        uid = self.identity.require(user_id)
+        return await self.conversation.chat(uid, message, session_id)
+
+    def conversations(self, user_id: str | None = None) -> list[dict]:
+        return self.conversation.sessions(self.identity.require(user_id))
+
+    def conversation_detail(self, session_id: str, user_id: str | None = None) -> dict:
+        return self.conversation.detail(self.identity.require(user_id), session_id)
+
+    def conversation_profile(self, user_id: str | None = None):
+        return self.conversation.profile(self.identity.require(user_id))
+
+    def save_conversation_profile(self, payload: dict, user_id: str | None = None) -> dict:
+        return self.conversation_profile(user_id).update(payload)
+
     def feishu_settings(self, user_id: str | None = None) -> dict:
         raw = self._feishu_raw(user_id)
         secret = str(raw.get("app_secret") or "")
@@ -157,6 +176,9 @@ class RadarService:
             "webhook_url": raw.get("webhook_url") or "",
             "webhook_secret_set": bool(webhook_secret),
             "ready": bool(raw.get("app_id") and secret and (raw.get("receive_id") or raw.get("receive_mobile"))),
+            "verification_status": raw.get("verification_status") or "unverified",
+            "verification_message": raw.get("verification_message") or "尚未验证飞书凭证",
+            "verified_at": raw.get("verified_at") or "",
         }
 
     def save_feishu_settings(self, payload: dict, user_id: str | None = None) -> dict:
@@ -172,6 +194,10 @@ class RadarService:
         webhook_secret = str(payload.get("webhook_secret") or "").strip()
         if webhook_secret and webhook_secret not in {"********", "••••••••"}:
             merged["webhook_secret"] = webhook_secret
+        verification = validate_app_config(merged)
+        merged["verification_status"] = "verified" if verification.get("ok") else "failed"
+        merged["verification_message"] = str(verification.get("reason") or "验证失败")
+        merged["verified_at"] = datetime.now(timezone.utc).isoformat()
         _write_json(self.root / "users" / uid / "feishu.json", merged)
         if merged.get("receive_id"):
             try:
@@ -429,7 +455,16 @@ class RadarService:
         )
         results = []
         for item in picked:
+            decision = decide_proactive_notification(
+                item,
+                self.conversation_profile(scope.user_id).get(),
+                scope.workspace.push_settings(),
+            )
+            if decision.decision != "push_now":
+                results.append({"ok": True, "id": item.get("id"), "proactive": decision.to_dict()})
+                continue
             pushed = self._push_item(scope, item)
+            pushed["proactive"] = decision.to_dict()
             results.append(pushed)
             if pushed.get("ok"):
                 scope.memory.mark_pushed(item["id"])

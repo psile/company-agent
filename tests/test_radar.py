@@ -191,6 +191,25 @@ def test_mobile_lookup_handles_empty_user_list(monkeypatch):
     assert "mobile" in out["reason"]
 
 
+def test_validate_app_config_checks_credentials_and_mobile(monkeypatch):
+    monkeypatch.setattr(
+        "radar.feishu._tenant_access_token",
+        lambda app_id, app_secret: {"ok": True, "tenant_access_token": "token"},
+    )
+    monkeypatch.setattr(
+        "radar.feishu._lookup_open_id_by_mobile",
+        lambda token, mobile: {"ok": True, "open_id": "ou_test"},
+    )
+    from radar.feishu import validate_app_config
+
+    out = validate_app_config(
+        {"app_id": "cli_test", "app_secret": "secret", "receive_mobile": "13800138000"}
+    )
+    assert out["ok"] is True
+    assert out["credentials_ok"] is True
+    assert out["recipient_ok"] is True
+
+
 def test_dislike_lowers_topic(tmp_path, monkeypatch):
     monkeypatch.setenv("RADAR_LLM", "0")
     svc = RadarService(data_dir=tmp_path)

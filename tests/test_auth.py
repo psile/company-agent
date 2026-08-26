@@ -42,6 +42,10 @@ def test_session_logout(tmp_path, monkeypatch):
 
 
 def test_feishu_secret_stays_per_user_and_masked(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "radar.pipeline.validate_app_config",
+        lambda config: {"ok": True, "reason": "verified"},
+    )
     svc = _svc(tmp_path, monkeypatch)
     saved = svc.save_feishu_settings(
         {
@@ -55,6 +59,7 @@ def test_feishu_secret_stays_per_user_and_masked(tmp_path, monkeypatch):
     assert saved["app_id"] == "cli_alice"
     assert saved["app_secret_set"] is True
     assert saved["ready"] is True
+    assert saved["verification_status"] == "verified"
     assert "alice-secret" not in str(saved)
     bob = svc.feishu_settings("bob")
     assert not bob["app_secret_set"]

@@ -75,6 +75,67 @@ def feishu_status() -> dict[str, Any]:
     }
 
 
+def validate_app_config(app: dict[str, Any]) -> dict[str, Any]:
+    """Validate credentials and, when possible, resolve the configured recipient."""
+    cfg = app_config_from(app, use_env=False)
+    if not cfg.get("ready"):
+        return {
+            "ok": False,
+            "credentials_ok": False,
+            "recipient_ok": False,
+            "reason": cfg.get("reason") or "飞书配置不完整",
+        }
+
+    token = _tenant_access_token(cfg["app_id"], cfg["app_secret"])
+    if not token.get("ok"):
+        return {
+            "ok": False,
+            "credentials_ok": False,
+            "recipient_ok": False,
+            "reason": token.get("reason") or "App ID 或 App Secret 验证失败",
+        }
+
+    receive_id = str(cfg.get("receive_id") or "").strip()
+    receive_type = str(cfg.get("receive_id_type") or "email").strip()
+    mobile = str(cfg.get("receive_mobile") or "").strip()
+    if not receive_id and mobile:
+        resolved = _lookup_open_id_by_mobile(token["tenant_access_token"], mobile)
+        if not resolved.get("ok"):
+            return {
+                "ok": False,
+                "credentials_ok": True,
+                "recipient_ok": False,
+                "reason": resolved.get("reason") or "凭证有效，但无法通过手机号找到接收人",
+            }
+        return {
+            "ok": True,
+            "credentials_ok": True,
+            "recipient_ok": True,
+            "reason": "App ID、App Secret 和接收人均验证成功",
+        }
+
+    if receive_type == "open_id" and not receive_id.startswith("ou_"):
+        return {
+            "ok": False,
+            "credentials_ok": True,
+            "recipient_ok": False,
+            "reason": "App ID 和 App Secret 有效，但 open_id 格式不正确，应以 ou_ 开头",
+        }
+    if receive_type == "email" and "@" not in receive_id:
+        return {
+            "ok": False,
+            "credentials_ok": True,
+            "recipient_ok": False,
+            "reason": "App ID 和 App Secret 有效，但接收邮箱格式不正确",
+        }
+    return {
+        "ok": True,
+        "credentials_ok": True,
+        "recipient_ok": True,
+        "reason": "App ID 和 App Secret 验证成功，接收人格式正确",
+    }
+
+
 def push_app_text(text: str, app: dict[str, str] | None = None) -> dict:
     load_env()
     cfg = app or _app_config()

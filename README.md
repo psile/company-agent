@@ -78,13 +78,33 @@
 ## 运行
 
 ```powershell
-cd D:\working\company_agent\radar
+cd D:\hobby\AI_agent\memory\company-agent
 copy env.example .env
 # 按下面「环境变量」填好 .env
 python -m radar serve
 ```
 
 浏览器：http://127.0.0.1:8765/
+
+登录后打开 `#/chat` 或点击左侧“秘书对话”。对话 Agent 会先判断意图，再通过 Tool Registry 调用现有 Memory、Workspace、关注、知识库和 Radar；请求体中的 `user_id` 不会被信任，用户身份始终来自登录 token。
+
+### Conversation API
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `POST` | `/api/chat` | 持续对话；传入 `message` 和可选 `session_id` |
+| `GET` | `/api/conversations` | 当前登录用户的历史会话 |
+| `GET` | `/api/conversations/{session_id}` | 会话详情和消息 |
+| `GET` | `/api/conversation-profile` | 获取回答风格与主动服务偏好 |
+| `PUT` | `/api/conversation-profile` | 更新当前用户的对话偏好 |
+
+每个用户的数据分别保存在：
+
+```text
+data/users/<user_id>/conversations/sessions.json
+data/users/<user_id>/conversations/messages.json
+data/users/<user_id>/conversation_profile.json
+```
 
 打开后先登录。可创建自己的账号，或试用 `alice / alice123`、`bob / bob123`。每个账号有一份私有 Memory。飞书 App ID / Secret 写在 **设置 → 账号与安全**，只作用于当前用户。
 
@@ -117,12 +137,25 @@ copy env.example .env
 
 程序启动时会读取项目根目录 `.env` 或 `data/.env`，且不会覆盖已经存在的系统环境变量。
 
+### 硅基流动 DeepSeek-V4-Flash
+
+项目使用 OpenAI 兼容的 `/chat/completions` 接口，可直接接入硅基流动：
+
+```env
+RADAR_LLM=1
+LLM_BASE_URL=https://api.siliconflow.cn/v1
+LLM_API_KEY=在硅基流动控制台创建的_API_Key
+LLM_MODEL=deepseek-ai/DeepSeek-V4-Flash
+```
+
+修改 `.env` 后需要重启 `python -m radar serve`。启动后访问 `/api/health`，看到 `llm: true` 和对应模型名即表示配置已加载。API Key 只保存在本机 `.env`，不要填写进 README、源码或提交记录。
+
 | 变量 | 含义 | 示例 |
 |---|---|---|
 | `LLM_BASE_URL` | OpenAI 兼容网关 | `http://127.0.0.1:8000/v1` |
 | `LLM_API_KEY` | 模型密钥 | 留空则按网关要求 |
 | `LLM_MODEL` | 模型名 | 按你的网关填写 |
-| `RADAR_LLM=0` | 关掉模型，退回启发式 | `0` |
+| `RADAR_LLM` | `1` 启用模型；`0` 退回启发式 | `1` |
 | `FEISHU_APP_ID` | 飞书自建应用 App ID | `cli_xxx` |
 | `FEISHU_APP_SECRET` | 飞书自建应用 App Secret | **不要入库** |
 | `FEISHU_RECEIVE_ID_TYPE` | 接收人类型 | `email` 或 `open_id` |
@@ -147,6 +180,13 @@ copy env.example .env
 ## 接入飞书
 
 推荐「一对一应用机器人」做个人秘书私聊。群自定义机器人适合临时通知群。
+
+飞书接入分为两种能力：
+
+| 模式 | 当前状态 | 说明 |
+|---|---|---|
+| Agent 主动推送到飞书 | 已支持 | 高相关内容、手动测试消息发送给指定用户 |
+| 在飞书中向 Agent 发消息并获得回复 | 待接入长连接监听器 | 需要消息读取权限、事件订阅，以及常驻的飞书事件客户端 |
 
 ### 一对一应用机器人
 
@@ -176,6 +216,36 @@ FEISHU_RECEIVE_MOBILE=13800138000
 python -m radar feishu-test
 ```
 
+账号设置页不会回显已保存的 App Secret。点击“保存并验证”后，页面会真实校验 App ID、Secret 和接收人，并显示成功或具体失败原因。
+
+### 飞书内与 Agent 对话
+
+如果需要在飞书私聊窗口中给机器人发消息，还要在飞书开放平台配置消息接收能力。
+
+权限管理页面先点击蓝色 **开通权限**，再搜索权限；页面顶部搜索框只过滤已经开通的权限。可通过“批量处理 → 批量导入权限”导入：
+
+```json
+{
+  "scopes": {
+    "tenant": [
+      "im:message:send_as_bot",
+      "im:message.p2p_msg:readonly",
+      "contact:user.id:readonly"
+    ],
+    "user": []
+  }
+}
+```
+
+然后进入 **事件与回调**：
+
+1. 选择“使用长连接接收事件”。本机开发推荐长连接，不需要公网 HTTPS 回调地址。
+2. 添加事件 `im.message.receive_v1`（接收消息）。
+3. 如果还要支持群聊 `@机器人`，增加 `im:message.group_at_msg:readonly`。
+4. 创建新版本、发布，并确保应用可用范围包含目标用户。
+
+注意：完成开放平台配置只代表飞书会发送事件。当前仓库还需要实现并运行飞书长连接监听器，把消息事件转给 `/api/chat`，再将 Agent 回复发回飞书；在该监听器完成前，飞书主动推送可用，但飞书内双向对话尚未启用。
+
 ### 群自定义机器人
 
 ```
@@ -191,6 +261,10 @@ FEISHU_SECRET=
 
 ```text
 Agent Core
+├── Conversation    radar/conversation.py + radar/agent.py
+├── Tool Registry   radar/agent_tools.py
+├── Chat Storage    radar/conversation_store.py + radar/conversation_profile.py
+├── Proactive       radar/proactive.py
 ├── Collector      radar/ingest.py + sources.json
 ├── Intelligence   radar/intelligence.py
 ├── Memory         radar/user_memory.py + radar/memory_os.py
