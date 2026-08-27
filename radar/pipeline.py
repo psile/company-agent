@@ -19,6 +19,7 @@ from .proactive import decide_proactive_notification
 from .seeds import bootstrap_new_user, bootstrap_user_dir, spec_by_id
 from .store import ContentPool, LocalMemory, _read_json, _write_json
 from .user_memory import UserMemory
+from .work_memory import WorkMemory
 from .workspace import Workspace, classify_knowledge, parse_follow_text
 
 
@@ -36,6 +37,7 @@ class UserScope:
     workspace: Workspace
     hierarchy: HierarchicalMemory
     notify: NotificationLog
+    work: WorkMemory
 
 
 class RadarService:
@@ -43,6 +45,9 @@ class RadarService:
         load_env()
         self.root = data_dir or DATA_DIR
         self.root.mkdir(parents=True, exist_ok=True)
+        from . import llm
+
+        llm.set_data_dir(self.root)
         self.identity = IdentityService(self.root)
         self._ensure_demo()
         self.pool = ContentPool(self.root / "pool")
@@ -99,6 +104,7 @@ class RadarService:
             workspace=Workspace(root, observe_path=self.observe_path),
             hierarchy=HierarchicalMemory(root, local),
             notify=NotificationLog(root),
+            work=WorkMemory(root, uid),
         )
 
     def _find_item(self, scope: UserScope, item_id: str) -> dict | None:
@@ -214,6 +220,29 @@ class RadarService:
     def change_password(self, user_id: str, old_password: str, new_password: str) -> dict:
         return self.identity.change_password(user_id, old_password, new_password)
 
+    def llm_settings(self) -> dict:
+        from . import llm
+
+        llm.set_data_dir(self.root)
+        return llm.public_llm_settings()
+
+    def recall_memory(self, query: str, user_id: str | None = None, limit: int = 8) -> list[dict]:
+        from .retrieve import public_hits, retrieve
+
+        return public_hits(retrieve(self._scope(user_id), query, limit=limit))
+
+    def save_llm_settings(self, payload: dict | None = None) -> dict:
+        from . import llm
+
+        llm.set_data_dir(self.root)
+        return llm.save_llm_settings(payload or {})
+
+    def test_llm_connection(self) -> dict:
+        from . import llm
+
+        llm.set_data_dir(self.root)
+        return llm.test_llm_connection()
+
     def _feishu_raw(self, user_id: str | None = None) -> dict:
         uid = self.identity.require(user_id)
         path = self.root / "users" / uid / "feishu.json"
@@ -328,11 +357,13 @@ class RadarService:
                 "feishu_mode": st.get("feishu_mode"),
                 "push": st["push"],
             },
+            "llm_settings": self.llm_settings(),
             "profile": ctx.get("profile") or {},
             "interests": ctx.get("interests") or [],
             "project": ctx.get("project") or {},
             "behavior": behavior,
             "goals": scope.workspace.goals(),
+            "work_memory": scope.work.snapshot(),
             "products": scope.workspace.products(),
             "sources": self.sources,
             "intel": intel,
@@ -353,6 +384,8 @@ class RadarService:
                 "feedback": int(counts.get("like") or 0) + int(counts.get("dislike") or 0),
             },
             "brief": _brief_preview(for_you, work, personal, observe, push),
+            "tracker": self.project_tracker(scope.user_id),
+            "skills": self.list_office_skills(),
         }
 
     def add_follow(self, text: str = "", topic: str = "", weight: float = 0.86, user_id: str | None = None) -> dict:
@@ -382,6 +415,150 @@ class RadarService:
 
     def save_goals(self, items: list[dict], user_id: str | None = None) -> list[dict]:
         return self._scope(user_id).workspace.save_goals(items)
+
+    def work_snapshot(self, user_id: str | None = None) -> dict:
+        return self._scope(user_id).work.snapshot()
+
+    def list_tasks(self, user_id: str | None = None, include_done: bool = True) -> list[dict]:
+        return self._scope(user_id).work.tasks(include_done=include_done)
+
+    def create_task(self, payload: dict, user_id: str | None = None) -> dict:
+        from .reminders.service import schedule_task_reminders
+
+        uid = self.identity.require(user_id)
+        data = dict(payload or {})
+        data.pop("user_id", None)
+        row = self._scope(uid).work.create_task(data)
+        schedule_task_reminders(self, uid, row)
+        return row
+
+    def update_task(self, task_id: str, payload: dict, user_id: str | None = None) -> dict:
+        from .reminders.service import on_task_updated
+
+        uid = self.identity.require(user_id)
+        data = dict(payload or {})
+        data.pop("user_id", None)
+        row = self._scope(uid).work.update_task(task_id, data)
+        on_task_updated(self, uid, row, data)
+        return row
+
+    def list_reminders(self, user_id: str | None = None, include_sent: bool = True) -> list[dict]:
+        return self._scope(user_id).work.reminders(include_sent=include_sent)
+
+    def create_reminder(self, payload: dict, user_id: str | None = None) -> dict:
+        from .reminders.service import create_manual_reminder
+
+        uid = self.identity.require(user_id)
+        return create_manual_reminder(self, uid, payload)
+
+    def evaluate_reminders(
+        self,
+        user_id: str | None = None,
+        now=None,
+        *,
+        deliver: bool = True,
+        force_morning: bool = False,
+    ) -> list[dict]:
+        from .reminders.service import evaluate_all, evaluate_user
+
+        if user_id:
+            return evaluate_user(self, user_id, now=now, deliver=deliver, force_morning=force_morning)
+        return evaluate_all(self, now=now, deliver=deliver, force_morning=force_morning)
+
+    def list_work_events(self, user_id: str | None = None) -> list[dict]:
+        return self._scope(user_id).work.events()
+
+    def list_work_notes(self, user_id: str | None = None) -> list[dict]:
+        return self._scope(user_id).work.notes()
+
+    def add_work_note(self, payload: dict, user_id: str | None = None) -> dict:
+        uid = self.identity.require(user_id)
+        data = dict(payload or {})
+        data.pop("user_id", None)
+        return self._scope(uid).work.add_note(data)
+
+    def list_reports(self, user_id: str | None = None, report_type: str | None = None) -> list[dict]:
+        return self._scope(user_id).work.reports(report_type)
+
+    def save_report(self, payload: dict, user_id: str | None = None) -> dict:
+        uid = self.identity.require(user_id)
+        data = dict(payload or {})
+        data.pop("user_id", None)
+        return self._scope(uid).work.save_report(data)
+
+    def update_report(self, report_id: str, payload: dict, user_id: str | None = None) -> dict:
+        uid = self.identity.require(user_id)
+        data = dict(payload or {})
+        data.pop("user_id", None)
+        return self._scope(uid).work.update_report(report_id, data)
+
+    def generate_report(
+        self,
+        report_type: str = "daily",
+        user_id: str | None = None,
+        *,
+        now=None,
+        project_id: str | None = None,
+        start_time: str | None = None,
+        end_time: str | None = None,
+    ) -> dict:
+        from .skills.report.service import generate_report as build_report
+
+        uid = self.identity.require(user_id)
+        return build_report(
+            self,
+            uid,
+            report_type,
+            now=now,
+            project_id=project_id,
+            start_time=start_time,
+            end_time=end_time,
+        )
+
+    def project_tracker(self, user_id: str | None = None) -> dict:
+        from .skills.project_tracker.service import project_snapshot
+
+        uid = self.identity.require(user_id)
+        return project_snapshot(self, uid)
+
+    def list_project_trackers(self, user_id: str | None = None) -> dict:
+        from .skills.project_tracker.service import list_trackers
+
+        uid = self.identity.require(user_id)
+        return list_trackers(self, uid)
+
+    def list_office_skills(self) -> list[dict]:
+        from .skills.catalog import list_office_skills
+
+        return list_office_skills()
+
+    def breakdown_task(self, task_id: str | None = None, user_id: str | None = None) -> dict:
+        from .skills.task_capture.extractor import breakdown_subtasks
+
+        uid = self.identity.require(user_id)
+        work = self._scope(uid).work
+        parent = work.get_task(task_id) if task_id else None
+        if not parent:
+            open_tasks = [row for row in work.tasks(include_done=False) if not row.get("parent_task_id")]
+            parent = open_tasks[0] if open_tasks else None
+        if not parent:
+            raise KeyError("task not found")
+        created = []
+        for row in breakdown_subtasks(parent.get("title") or ""):
+            created.append(
+                self.create_task(
+                    {
+                        **row,
+                        "parent_task_id": parent["id"],
+                        "project": parent.get("project") or "",
+                        "project_id": parent.get("project_id") or "",
+                        "source_type": "breakdown",
+                        "source_ref": parent["id"],
+                    },
+                    user_id=uid,
+                )
+            )
+        return {"ok": True, "parent": parent, "items": created}
 
     def save_products(self, items: list[dict], user_id: str | None = None) -> list[dict]:
         return self._scope(user_id).workspace.save_products(items)

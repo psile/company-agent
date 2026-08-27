@@ -48,6 +48,27 @@ class ConversationStore:
             raise KeyError("conversation not found")
         return self.create_session(title)
 
+    def ensure_session(self, session_id: str, title: str = "飞书对话") -> dict[str, Any]:
+        sid = (session_id or "").strip()
+        if not sid:
+            return self.create_session(title)
+        for row in self.sessions():
+            if row.get("id") == sid and row.get("user_id") == self.user_id:
+                return row
+        now = _now()
+        session = {
+            "id": sid,
+            "user_id": self.user_id,
+            "title": (title or "飞书对话").strip()[:60],
+            "created_at": now,
+            "updated_at": now,
+            "channel": "feishu",
+        }
+        rows = self.sessions()
+        rows.insert(0, session)
+        _write_json(self.sessions_path, {"items": rows[:100]})
+        return session
+
     def messages(self, session_id: str) -> list[dict[str, Any]]:
         if not any(row.get("id") == session_id for row in self.sessions()):
             raise KeyError("conversation not found")
@@ -95,7 +116,7 @@ class ConversationStore:
             if row.get("id") != session_id:
                 continue
             row["updated_at"] = _now()
-            if first_user_message and row.get("title") == "新对话":
+            if first_user_message and row.get("title") in {"新对话", "飞书对话"}:
                 row["title"] = first_user_message.strip().replace("\n", " ")[:32]
             break
         _write_json(self.sessions_path, {"items": rows[:100]})

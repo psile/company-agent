@@ -49,6 +49,20 @@ DEMO_USERS = [
             {"id": "a-week", "kind": "week", "title": "接入长期记忆与反馈闭环", "priority": "high", "progress": 40, "linked": 3, "done": False},
         ],
         "products": [{"id": "mem0", "name": "Mem0", "status": "深度关注", "running": True}],
+        "tasks": [
+            {
+                "title": "完善 Memory Demo",
+                "description": "补齐多用户 Memory 隔离与对话记忆演示。",
+                "priority": "high",
+                "status": "in_progress",
+                "project": "Personal Work Secretary Agent",
+                "project_id": "personal-agent",
+                "deadline": "2026-08-29T18:00:00+08:00",
+            }
+        ],
+        "work_notes": [
+            {"content": "第一阶段优先聚焦主动感知 + 个性化推荐。", "tags": ["decision"], "project_id": "personal-agent"}
+        ],
     },
     {
         "id": BOB,
@@ -81,6 +95,20 @@ DEMO_USERS = [
             {"id": "b-week", "kind": "week", "title": "对比 VLM 在智驾场景的方案", "priority": "medium", "progress": 20, "linked": 2, "done": False},
         ],
         "products": [{"id": "tesla-fsd", "name": "Occupancy Network", "status": "持续跟踪", "running": True}],
+        "tasks": [
+            {
+                "title": "整理 World Model 数据集",
+                "description": "汇总占用预测与闭环规划相关数据集，供本周调研使用。",
+                "priority": "high",
+                "status": "todo",
+                "project": "Autonomous Driving Research",
+                "project_id": "autonomous-driving",
+                "deadline": "2026-08-30T18:00:00+08:00",
+            }
+        ],
+        "work_notes": [
+            {"content": "智驾场景 VLM 方案对比仍缺闭环评测集。", "tags": ["research"], "project_id": "autonomous-driving"}
+        ],
     },
 ]
 

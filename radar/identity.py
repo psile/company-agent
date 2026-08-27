@@ -261,6 +261,9 @@ class IdentityService:
         _write_json(self.sessions_path, {"items": items[-200:]})
         return token
 
+    def bind_identity(self, user_id: str, provider: str, external_id: str) -> dict[str, Any]:
+        return self._add_identity(user_id, provider, external_id)
+
     def _add_identity(self, user_id: str, provider: str, external_id: str) -> dict[str, Any]:
         for row in self.identities():
             if row.get("provider") == provider and str(row.get("external_id")) == external_id:

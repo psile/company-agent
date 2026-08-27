@@ -59,25 +59,30 @@ class ToolRegistry:
         self.register("execute_skill", "执行已注册技能", self._execute_skill)
 
     async def _get_user_memory(self, user_id: str, **_: Any) -> dict[str, Any]:
-        scope = self.service.for_user(user_id)
-        return {"ok": True, "memory": scope.user_memory.context(), "hierarchy": scope.hierarchy.snapshot()}
+        from .retrieve import public_hits, retrieve
 
-    async def _search_memory(self, user_id: str, query: str = "", **_: Any) -> dict[str, Any]:
         scope = self.service.for_user(user_id)
         ctx = scope.user_memory.context()
-        hierarchy = scope.hierarchy.snapshot()
-        rows: list[dict[str, str]] = []
-        for item in ctx.get("interests") or []:
-            rows.append({"kind": "interest", "text": str(item.get("topic") or "")})
-        project = ctx.get("project") or {}
-        rows.append({"kind": "project", "text": " ".join([str(project.get("project") or ""), *(project.get("topics") or [])])})
-        long_term = hierarchy.get("long_term") or {}
-        rows.append({"kind": "long_term", "text": str(long_term.get("profile_summary") or "")})
-        for fact in long_term.get("knowledge") or []:
-            rows.append({"kind": "fact", "text": str(fact)})
-        needle = (query or "").lower().strip()
-        matched = [row for row in rows if not needle or any(word in row["text"].lower() for word in needle.split())]
-        return {"ok": True, "items": (matched or rows)[:12], "project": project}
+        return {
+            "ok": True,
+            "memory": {
+                "profile": ctx.get("profile") or {},
+                "interests": (ctx.get("interests") or [])[:8],
+                "project": ctx.get("project") or {},
+            },
+            "recalled": public_hits(retrieve(scope, "", limit=8)),
+        }
+
+    async def _search_memory(self, user_id: str, query: str = "", **_: Any) -> dict[str, Any]:
+        from .retrieve import public_hits, retrieve
+
+        scope = self.service.for_user(user_id)
+        hits = retrieve(scope, query, limit=12)
+        return {
+            "ok": True,
+            "items": public_hits(hits),
+            "project": (scope.user_memory.project() if hasattr(scope, "user_memory") else {}),
+        }
 
     async def _save_memory(
         self,
@@ -156,11 +161,32 @@ class ToolRegistry:
         return {"ok": True, "topic": topic, "interests": interests}
 
     async def _search_knowledge(self, user_id: str, query: str = "", **_: Any) -> dict[str, Any]:
-        rows = self.service.for_user(user_id).memory.cards()
-        needle = query.lower().strip()
+        from .retrieve import retrieve
+
+        scope = self.service.for_user(user_id)
+        if not (query or "").strip():
+            return {"ok": True, "items": scope.memory.cards()[:10]}
+        refs = {row.get("ref") for row in retrieve(scope, query, limit=12) if row.get("kind") == "knowledge"}
+        cards = [row for row in scope.memory.cards() if (row.get("id") or row.get("source_url")) in refs]
+        return {"ok": True, "items": (cards or scope.memory.cards())[:10]}
+
+    async def _search_latest_content(self, user_id: str, query: str = "", **_: Any) -> dict[str, Any]:
+        from .retrieve import text_similarity
+
+        rows = self.service.for_user(user_id).memory.feeds().get("for_you") or []
+        needle = (query or "").strip()
         if needle:
-            rows = [row for row in rows if needle in str(row).lower()]
-        return {"ok": True, "items": rows[:10]}
+            ranked = sorted(
+                rows,
+                key=lambda row: -text_similarity(needle, f"{row.get('title') or ''} {row.get('summary_zh') or row.get('summary') or ''} {' '.join(row.get('tags') or [])}"),
+            )
+            scored = [
+                row
+                for row in ranked
+                if text_similarity(needle, f"{row.get('title') or ''} {row.get('summary_zh') or row.get('summary') or ''} {' '.join(row.get('tags') or [])}") >= 0.18
+            ]
+            rows = scored or ranked
+        return {"ok": True, "items": rows[:8]}
 
     async def _save_knowledge(self, user_id: str, title: str, content: str, source_url: str = "", **_: Any) -> dict[str, Any]:
         scope = self.service.for_user(user_id)
@@ -175,21 +201,13 @@ class ToolRegistry:
         )
         return {"ok": True, "card": card}
 
-    async def _search_latest_content(self, user_id: str, query: str = "", **_: Any) -> dict[str, Any]:
-        rows = self.service.for_user(user_id).memory.feeds().get("for_you") or []
-        needle = query.lower().strip()
-        if needle:
-            terms = [term for term in needle.split() if len(term) > 1]
-            matched = [row for row in rows if any(term in str(row).lower() for term in terms)]
-            rows = matched or rows
-        return {"ok": True, "items": rows[:8]}
-
     async def _get_recommendations(self, user_id: str, **_: Any) -> dict[str, Any]:
         rows = self.service.for_user(user_id).memory.feeds().get("for_you") or []
         return {"ok": True, "items": rows[:8]}
 
     async def _list_skills(self, user_id: str, **_: Any) -> dict[str, Any]:
-        return {"ok": True, "items": [], "message": "技能接口已就绪，当前尚未安装外部技能。"}
+        items = self.service.list_office_skills()
+        return {"ok": True, "items": items}
 
     async def _execute_skill(self, user_id: str, skill: str = "", **_: Any) -> dict[str, Any]:
         return {"ok": False, "reason": f"技能 {skill or 'unknown'} 尚未安装"}

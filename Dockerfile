@@ -7,6 +7,8 @@
 #     radar-demo
 FROM python:3.12-slim
 WORKDIR /app
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 COPY radar /app/radar
 COPY web /app/web
 COPY sources.json /app/sources.json

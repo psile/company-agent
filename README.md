@@ -11,6 +11,38 @@
 
 ---
 
+## 本轮更新
+
+相对 GitHub `main` 上一次「对话秘书」提交，这次把秘书从「能聊、能推资讯」推进到「能记待办、能到点提醒、能写总结」。
+
+### 增加了哪些功能
+
+| 能力 | 你怎么用 | 说明 |
+|---|---|---|
+| **工作记忆 Work Memory** | 对话里说待办，或打开「我的工作」 | 每人一份任务 / 事件 / 备忘 / 提醒，存在 `data/users/<id>/`，互不串号 |
+| **任务捕捉** | 「周五前把 PPT 做完，提醒我」 | 自动建成待办；有截止日期时会在截止前 24h / 3h 提醒 |
+| **任务拆解** | 「帮我拆一下这个任务」 | 把一条待办拆成可执行的子步骤 |
+| **智能提醒** | 「我等下三点要开交流会，提醒我一下」 | 听懂「三点 / 下午 / 等下」；到点推飞书私聊和站内通知；过了点再说会立刻补发 |
+| **今日工作重点** | 「给我今天的工作重点」 | 按待办、截止和项目进度生成早报 |
+| **日报 / 周报** | 「写日报」「生成本周总结」或打开「工作总结」 | 从当天 / 当周的任务和事件汇总，不是空模板 |
+| **项目跟踪** | 「这个项目现在进展怎么样？」或打开「项目」 | 根据待办完成情况估算进度和下一步 |
+| **网页里配大模型** | 设置 → 大模型 | 网关、模型名、API Key 存本机 `data/llm.json`，优先于 `.env`，接口不回显完整密钥 |
+| **按问题检索记忆** | 对话里问「我最近在研究什么」；`GET /api/memory/search?q=` | 按当前问题召回画像、兴趣、项目、长中短记忆和待办，带同义词（如 长期记忆 ↔ Agent Memory） |
+| **飞书里来回对话** | 给机器人发消息 | 长连接收消息，回复走同一套 Agent；主动提醒也会推回这条私聊（`open_id`） |
+
+工具箱里仍占位、尚未实现的：研究助手、知识整理、会议助手、决策记忆、交付物生成。
+
+### 改了什么
+
+- **自然语言提醒**：以前「等下三点……提醒我」会被当成普通待办，只回「已记下……截止前会提醒你」，**没有定时记录**。现在会建成 15:00 的提醒；中文数字「三」能解析；当天已过点则马上发。
+- **提醒扫描**：默认约 **1 分钟**一圈（`RADAR_REMIND_MINUTES`），启动后也会扫一次。未配飞书应用推送时，改走收件箱机器人的 `open_id`，不再只写网页通知。
+- **推荐相关度**：兴趣 / 语义分不再只靠字面交集，会用文本相似和同义关系。
+- **存盘**：用户 JSON 改为临时文件再 `replace`，降低写到一半断电留下坏文件的概率。
+- **HTTP**：`server.py` 改为路由表（`radar/routes.py`），不再靠超长 if-elif 分发。
+- **技能与记忆解耦**：办公 Skill 只通过 `RadarService` 写数据，不直接改 JSON 文件。
+
+---
+
 ## 产品一句话
 
 大多数工具都在等你提问。你不搜，它就不工作。
@@ -48,25 +80,34 @@
 左侧导航始终在：
 
 - 首页
+- 秘书对话
+- 我的工作
+- 项目
+- 工作总结
 - 为你推荐
 - 我的关注
 - 目标管理
 - 知识库
 - 工具箱
 - 个人中心
-- 设置（个人信息 / 账号与安全 / 偏好设置 / 推送与通知 / 数据与隐私 / 成员与权限）
+- 设置（个人信息 / 账号与安全 / 大模型 / 偏好设置 / 推送与通知 / 数据与隐私 / 成员与权限）
 
 底部是记忆引擎状态：正常运行、已处理多少条、今日新增多少条。即使你没有和它对话，它也在后台替你观察。
 
 | 路由 | 页面 | 演示什么 |
 |---|---|---|
-| `#/` | 首页 | 今天观察了多少、筛出多少；Why For You；当前目标 |
+| `#/` | 首页 | 今天观察了多少、筛出多少；Why For You；今日工作重点 |
+| `#/chat` | 秘书对话 | 意图识别后调 Tool / 办公 Skill；飞书私聊走同一套 |
+| `#/work` | 我的工作 | 待办、提醒、工作事件 |
+| `#/projects` | 项目 | 进度估算与下一步 |
+| `#/reports` | 工作总结 | 日报 / 周报 |
 | `#/recommend` | 为你推荐 | 工作 / 个人推荐、相关度、本周主题、Daily Brief 预览 |
 | `#/follows` | 我的关注 | 主题权重、产品、信息源；自然语言加关注 |
 | `#/goals` | 目标管理 | 今日 / 短期 / 长期 / 不定期；Goal → Context → 推荐优先级 |
 | `#/knowledge` | 知识库 | 点赞收藏沉淀、LLM 预分类、手动改分类 |
-| `#/toolbox` | 工具箱 | Skills 入口占位，当前重点是 Recommendation Skill |
+| `#/toolbox` | 工具箱 | 已上线办公 Skill + 后续占位 |
 | `#/profile` | 个人中心 | 兴趣画像、偏好、Memory 摘要 |
+| `#/settings/llm` | 大模型 | 网关 / 模型 / API Key（只留本机） |
 | `#/settings/push` | 推送与通知 | Web / 飞书 / 对话、Morning Brief、高相关即时推送 |
 
 每一条推荐都必须有：中文摘要、来源、相关度、**为什么推荐给你**、**与当前项目的关系**、原文 / 有用 / 收藏 / 减少此类推荐。
@@ -81,6 +122,7 @@
 cd D:\hobby\AI_agent\memory\company-agent
 copy env.example .env
 # 按下面「环境变量」填好 .env
+pip install -r requirements.txt
 python -m radar serve
 ```
 
@@ -148,7 +190,9 @@ LLM_API_KEY=在硅基流动控制台创建的_API_Key
 LLM_MODEL=deepseek-ai/DeepSeek-V4-Flash
 ```
 
-修改 `.env` 后需要重启 `python -m radar serve`。启动后访问 `/api/health`，看到 `llm: true` 和对应模型名即表示配置已加载。API Key 只保存在本机 `.env`，不要填写进 README、源码或提交记录。
+登录后也可在 **设置 → 大模型** 里填写网关地址、模型名和 API Key，保存到本机 `data/llm.json`（已 gitignore）。系统里保存过的设置优先于 `.env`；接口不会把完整密钥再读出来。`.env` 仍可作为备选，改完后需重启进程。
+
+启动后访问 `/api/health`，看到 `llm: true` 和对应模型名即表示配置已加载。API Key 只保存在本机，不要填写进 README、源码或提交记录。
 
 | 变量 | 含义 | 示例 |
 |---|---|---|
@@ -162,6 +206,9 @@ LLM_MODEL=deepseek-ai/DeepSeek-V4-Flash
 | `FEISHU_RECEIVE_ID` | 接收人 ID / 邮箱 | |
 | `FEISHU_RECEIVE_MOBILE` | 手机号登录时换 open_id | |
 | `FEISHU_MODE` | 飞书通道：`mock` 只写站内通知；`developer` 才走真实飞书 | 默认 `mock` |
+| `FEISHU_INBOX` | 飞书入站对话；配好 App ID/Secret 后默认开启 | `1`；`0` 关闭 |
+| `FEISHU_INBOX_USER` | 匹配不到 open_id 时落到的内部账号 | `bob` |
+| `FEISHU_VERIFICATION_TOKEN` | HTTP 事件回调校验；长连接可不填 | |
 | `FEISHU_WEBHOOK_URL` | 群自定义机器人 webhook | 一对一应用机器人优先时可不填 |
 | `FEISHU_SECRET` | 群机器人签名密钥 | 未开签名则留空 |
 | `RADAR_HOST` | HTTP 监听地址 | `127.0.0.1` 或 `0.0.0.0` |
@@ -171,6 +218,8 @@ LLM_MODEL=deepseek-ai/DeepSeek-V4-Flash
 | `RADAR_PUSH_DRY_RUN=1` | 只生成文案，不真实发送 | `0` |
 | `RADAR_OBSERVE_MINUTES` | 后台定时拉源间隔（分钟） | `180`；`0` 关闭 |
 | `RADAR_OBSERVE_ON_START=1` | 启动后立刻采集一次 | 默认 `0` |
+| `RADAR_REMIND_MINUTES` | 后台扫描到期提醒的间隔（分钟） | `1`；`0` 关闭循环（仍可按 `RADAR_REMIND_ON_START` 启动时扫一次） |
+| `RADAR_REMIND_ON_START` | 启动数秒后立刻扫一遍提醒 | 默认 `1` |
 | `MEMORYOS_ENABLED` | 尝试官方 MemoryOS | `0` |
 
 `ingest` 显示 `pushed=0` 时，通常不是飞书坏了，而是没有内容达到 `RADAR_PUSH_THRESHOLD`，或该条已在 `data/pushed.json` 里记过。
@@ -186,7 +235,7 @@ LLM_MODEL=deepseek-ai/DeepSeek-V4-Flash
 | 模式 | 当前状态 | 说明 |
 |---|---|---|
 | Agent 主动推送到飞书 | 已支持 | 高相关内容、手动测试消息发送给指定用户 |
-| 在飞书中向 Agent 发消息并获得回复 | 待接入长连接监听器 | 需要消息读取权限、事件订阅，以及常驻的飞书事件客户端 |
+| 在飞书中向 Agent 发消息并获得回复 | 已支持 | `python -m radar serve` 会拉起飞书长连接；也可走 `POST /api/feishu/event` |
 
 ### 一对一应用机器人
 
@@ -220,7 +269,13 @@ python -m radar feishu-test
 
 ### 飞书内与 Agent 对话
 
-如果需要在飞书私聊窗口中给机器人发消息，还要在飞书开放平台配置消息接收能力。
+`serve` 启动后会用 `FEISHU_APP_ID` / `FEISHU_APP_SECRET` 建立飞书长连接。你在飞书里给机器人发「你好」，会走和网页工作台同一套对话（会话 id 为 `feishu`），回复发回同一条私聊。长连接依赖 `lark-oapi`：
+
+```powershell
+pip install -r requirements.txt
+```
+
+发件人按顺序匹配：已绑定的飞书 `open_id` → 账号设置里的接收邮箱 / open_id → `.env` 的 `FEISHU_RECEIVE_ID` → `FEISHU_INBOX_USER`。个人使用时建议在 `.env` 写上 `FEISHU_INBOX_USER=bob`（或你的登录名）。
 
 权限管理页面先点击蓝色 **开通权限**，再搜索权限；页面顶部搜索框只过滤已经开通的权限。可通过“批量处理 → 批量导入权限”导入：
 
@@ -244,7 +299,7 @@ python -m radar feishu-test
 3. 如果还要支持群聊 `@机器人`，增加 `im:message.group_at_msg:readonly`。
 4. 创建新版本、发布，并确保应用可用范围包含目标用户。
 
-注意：完成开放平台配置只代表飞书会发送事件。当前仓库还需要实现并运行飞书长连接监听器，把消息事件转给 `/api/chat`，再将 Agent 回复发回飞书；在该监听器完成前，飞书主动推送可用，但飞书内双向对话尚未启用。
+配置完成后重启 `python -m radar serve`。日志出现 `[feishu-inbox] 长连接已启动` 即可在飞书里对话。没有公网 HTTPS 时用长连接；若走 HTTP 回调，把请求指到 `POST /api/feishu/event`（无需登录），并填写 `FEISHU_VERIFICATION_TOKEN`。
 
 ### 群自定义机器人
 
@@ -264,15 +319,19 @@ Agent Core
 ├── Conversation    radar/conversation.py + radar/agent.py
 ├── Tool Registry   radar/agent_tools.py
 ├── Chat Storage    radar/conversation_store.py + radar/conversation_profile.py
+├── Retrieve        radar/retrieve.py（按问题召回记忆）
 ├── Proactive       radar/proactive.py
-├── Collector      radar/ingest.py + sources.json
-├── Intelligence   radar/intelligence.py
-├── Memory         radar/user_memory.py + radar/memory_os.py
-├── Recommendation radar/recommender.py
-├── Push           radar/feishu.py
-├── Knowledge      收藏 → LLM 分类 → 知识库 → 手动调整
-├── Workspace      radar/workspace.py（目标 / 关注产品 / 推送偏好 / 观察计数）
-└── Skills         当前重点 Recommendation Skill；工具箱为后续预留
+├── Collector       radar/ingest.py + sources.json
+├── Intelligence    radar/intelligence.py
+├── Memory          radar/user_memory.py + radar/memory_os.py
+├── Work Memory     radar/work_memory.py（任务 / 备忘 / 提醒）
+├── Office Skills   radar/skills/（捕捉、拆解、提醒、日报周报、项目跟踪）
+├── Reminders       radar/reminders/（到点扫描、上下文文案、飞书投递）
+├── Recommendation  radar/recommender.py
+├── Push            radar/channels.py + radar/feishu.py + radar/feishu_inbox.py
+├── Knowledge       收藏 → LLM 分类 → 知识库 → 手动调整
+├── Workspace       radar/workspace.py
+└── HTTP            radar/routes.py + radar/server.py
 ```
 
 | 路径 | 职责 |
@@ -280,15 +339,21 @@ Agent Core
 | `radar/ingest.py` | 采集与去重 |
 | `radar/intelligence.py` | 中文摘要、分类、标签 |
 | `radar/user_memory.py` | 画像、兴趣权重、项目、行为 |
+| `radar/retrieve.py` | 按当前问题召回记忆，而不是整包塞进提示词 |
 | `radar/recommender.py` | 召回打分与 LLM 重排 |
-| `radar/pipeline.py` | 串起整条链路 |
+| `radar/pipeline.py` | 串起整条链路；Skill 只经这里写数据 |
+| `radar/work_memory.py` | 待办、事件、备忘、提醒账本 |
+| `radar/skills/` | 办公 Skill：捕捉 / 拆解 / 提醒 / 报告 / 项目跟踪 |
+| `radar/reminders/` | 定时扫描、截止前提醒、飞书与站内投递 |
 | `radar/workspace.py` | 工作台账本 |
-| `radar/feishu.py` | 飞书中文卡片 |
+| `radar/feishu.py` | 飞书推送（含按 `open_id` 私聊） |
+| `radar/feishu_inbox.py` | 飞书长连接收消息并回同一会话 |
+| `radar/routes.py` | HTTP 路由表 |
 | `radar/server.py` | HTTP 工作台 + API |
 | `web/` | 前端工作台 |
 | `sources.json` | 订阅源 |
 | `env.example` | 环境变量模板 |
-| `data/` | 本地画像与缓存，**不入库** |
+| `data/` | 本地画像、工作记忆、`llm.json`，**不入库** |
 
 ---
 

@@ -43,7 +43,14 @@ def main() -> None:
         result = push_text("【测试】办公秘书助手一对一飞书推送已接入。")
         print(result)
         return
-    raise SystemExit("usage: python -m radar [serve|ingest|push|feishu-test]")
+    if cmd == "feishu-inbox":
+        from .feishu_inbox import inbox_status, run_ws_client
+        from .pipeline import RadarService
+
+        print(inbox_status())
+        run_ws_client(RadarService())
+        return
+    raise SystemExit("usage: python -m radar [serve|ingest|push|feishu-test|feishu-inbox]")
 
 
 if __name__ == "__main__":

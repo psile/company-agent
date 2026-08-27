@@ -51,10 +51,12 @@ def send_for_user(
     notify: NotificationLog,
     content: dict[str, Any],
     feishu_cfg: dict[str, Any] | None = None,
+    service: Any = None,
 ) -> dict[str, Any]:
     from .feishu import app_config_from, format_push, push_text
 
     mock = MockFeishuChannel(notify)
+    text = content.get("text") or format_push(content)
     if get_bool("RADAR_PUSH_DRY_RUN", False):
         result = mock.send_message(user_id, content)
         result["reason"] = "RADAR_PUSH_DRY_RUN enabled"
@@ -63,19 +65,40 @@ def send_for_user(
     if user_keys:
         cfg = app_config_from(feishu_cfg, use_env=False)
         if cfg.get("ready"):
-            result = push_text(content.get("text") or format_push(content), app=cfg)
+            result = push_text(text, app=cfg)
             result["user_id"] = user_id
             WebChannel(notify).send_message(user_id, content)
             return result
         mocked = mock.send_message(user_id, content)
         mocked["reason"] = cfg.get("reason") or "feishu account incomplete"
+        inbox = _try_inbox_push(service, user_id, text)
+        if inbox.get("ok"):
+            mocked["ok"] = True
+            mocked["channel"] = "feishu_inbox"
         return mocked
     if get_str("FEISHU_MODE", "mock").lower() in {"developer", "enterprise"}:
         cfg = app_config_from(feishu_cfg, use_env=True)
         if cfg.get("ready"):
-            result = push_text(content.get("text") or format_push(content), app=cfg)
+            result = push_text(text, app=cfg)
             result["user_id"] = user_id
             if result.get("ok"):
                 WebChannel(notify).send_message(user_id, content)
             return result
-    return mock.send_message(user_id, {**content, "type": "high_relevance"})
+    inbox = _try_inbox_push(service, user_id, text)
+    result = mock.send_message(user_id, {**content, "type": content.get("type") or "high_relevance"})
+    if inbox.get("ok"):
+        result["ok"] = True
+        result["channel"] = "feishu_inbox"
+        result["reason"] = "sent via inbox bot"
+    return result
+
+
+def _try_inbox_push(service: Any, user_id: str, text: str) -> dict[str, Any]:
+    if service is None:
+        return {"ok": False, "reason": "no service"}
+    try:
+        from .feishu_inbox import push_inbox_text
+
+        return push_inbox_text(service, user_id, text)
+    except Exception as exc:
+        return {"ok": False, "reason": str(exc)}

@@ -12,6 +12,7 @@ import json
 import os
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -219,11 +220,113 @@ def app_config_from(overrides: dict[str, Any] | None = None, use_env: bool = Tru
         if value:
             cfg[key] = value
     missing = [key for key in ("app_id", "app_secret") if not cfg[key]]
+    cfg["has_credentials"] = not missing
     if not cfg["receive_id"] and not cfg["receive_mobile"]:
         missing.append("receive_id or receive_mobile")
     cfg["ready"] = not missing
     cfg["reason"] = "ok" if cfg["ready"] else f"missing {', '.join(missing)}"
     return cfg
+
+
+def bot_credentials(overrides: dict[str, Any] | None = None) -> dict[str, Any]:
+    """App ID / Secret only. Inbound chat does not need a preconfigured receive_id."""
+    load_env()
+    cfg = {
+        "app_id": (os.environ.get("FEISHU_APP_ID") or "").strip(),
+        "app_secret": (os.environ.get("FEISHU_APP_SECRET") or "").strip(),
+    }
+    for key in ("app_id", "app_secret"):
+        value = str((overrides or {}).get(key) or "").strip()
+        if value:
+            cfg[key] = value
+    cfg["ready"] = bool(cfg["app_id"] and cfg["app_secret"])
+    cfg["reason"] = "ok" if cfg["ready"] else "missing app_id or app_secret"
+    return cfg
+
+
+def reply_message(message_id: str, text: str, app: dict[str, Any] | None = None) -> dict[str, Any]:
+    cfg = bot_credentials(app)
+    if not cfg["ready"]:
+        return {"ok": False, "reason": cfg["reason"], "text": text}
+    mid = (message_id or "").strip()
+    if not mid:
+        return {"ok": False, "reason": "message_id required", "text": text}
+    token = _tenant_access_token(cfg["app_id"], cfg["app_secret"])
+    if not token.get("ok"):
+        token["text"] = text
+        return token
+    quoted = urllib.parse.quote(mid, safe="")
+    url = f"https://open.feishu.cn/open-apis/im/v1/messages/{quoted}/reply"
+    payload = {"content": json.dumps({"text": text}, ensure_ascii=False), "msg_type": "text"}
+    result = _post_json(url, payload, headers={"Authorization": f"Bearer {token['tenant_access_token']}"})
+    result["channel"] = "app_bot_reply"
+    result["message_id"] = mid
+    result["text"] = text
+    return result
+
+
+def send_chat_text(chat_id: str, text: str, app: dict[str, Any] | None = None) -> dict[str, Any]:
+    cfg = bot_credentials(app)
+    if not cfg["ready"]:
+        return {"ok": False, "reason": cfg["reason"], "text": text}
+    cid = (chat_id or "").strip()
+    if not cid:
+        return {"ok": False, "reason": "chat_id required", "text": text}
+    token = _tenant_access_token(cfg["app_id"], cfg["app_secret"])
+    if not token.get("ok"):
+        token["text"] = text
+        return token
+    url = "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id"
+    result = _post_json(
+        url,
+        _app_message_payload(cid, text),
+        headers={"Authorization": f"Bearer {token['tenant_access_token']}"},
+    )
+    result["channel"] = "app_bot_chat"
+    result["chat_id"] = cid
+    result["text"] = text
+    return result
+
+
+def send_open_id_text(open_id: str, text: str, app: dict[str, Any] | None = None) -> dict[str, Any]:
+    cfg = bot_credentials(app)
+    if not cfg["ready"]:
+        return {"ok": False, "reason": cfg["reason"], "text": text}
+    oid = (open_id or "").strip()
+    if not oid:
+        return {"ok": False, "reason": "open_id required", "text": text}
+    token = _tenant_access_token(cfg["app_id"], cfg["app_secret"])
+    if not token.get("ok"):
+        token["text"] = text
+        return token
+    url = "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id"
+    result = _post_json(
+        url,
+        _app_message_payload(oid, text),
+        headers={"Authorization": f"Bearer {token['tenant_access_token']}"},
+    )
+    result["channel"] = "app_bot_open_id"
+    result["open_id"] = oid
+    result["text"] = text
+    return result
+
+
+def lookup_user_profile(tenant_access_token: str, open_id: str) -> dict[str, Any]:
+    oid = (open_id or "").strip()
+    if not oid:
+        return {}
+    quoted = urllib.parse.quote(oid, safe="")
+    url = f"https://open.feishu.cn/open-apis/contact/v3/users/{quoted}?user_id_type=open_id"
+    result = _get_json(url, headers={"Authorization": f"Bearer {tenant_access_token}"})
+    if not result.get("ok"):
+        return {}
+    user = result.get("data", {}).get("data", {}).get("user") or result.get("data", {}).get("user") or {}
+    return {
+        "email": str(user.get("email") or "").strip(),
+        "enterprise_email": str(user.get("enterprise_email") or "").strip(),
+        "name": str(user.get("name") or "").strip(),
+        "open_id": str(user.get("open_id") or oid).strip(),
+    }
 
 
 def _tenant_access_token(app_id: str, app_secret: str) -> dict[str, Any]:
@@ -235,6 +338,10 @@ def _tenant_access_token(app_id: str, app_secret: str) -> dict[str, Any]:
     if result.get("ok") and token:
         return {"ok": True, "tenant_access_token": token}
     return {"ok": False, "reason": result.get("reason") or "tenant access token missing", "response": result}
+
+
+def lookup_open_id_by_mobile(tenant_access_token: str, mobile: str) -> dict[str, Any]:
+    return _lookup_open_id_by_mobile(tenant_access_token, mobile)
 
 
 def _lookup_open_id_by_mobile(tenant_access_token: str, mobile: str) -> dict[str, Any]:
@@ -260,6 +367,23 @@ def _app_message_payload(receive_id: str, text: str) -> dict[str, str]:
         "msg_type": "text",
         "content": json.dumps({"text": text}, ensure_ascii=False),
     }
+
+
+def _get_json(url: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
+    req = urllib.request.Request(url, headers=headers or {}, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return {"ok": False, "reason": str(exc)}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"ok": True, "response": raw}
+    code = parsed.get("code", 0)
+    if code not in (0, None):
+        return {"ok": False, "reason": parsed.get("msg") or parsed.get("message") or str(code), "data": parsed}
+    return {"ok": True, "data": parsed}
 
 
 def _post_json(url: str, payload: dict[str, Any], headers: dict[str, str] | None = None) -> dict[str, Any]:

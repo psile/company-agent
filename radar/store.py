@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import threading
 from pathlib import Path
 from typing import Any
+
+_JSON_LOCKS: dict[str, threading.Lock] = {}
+_JSON_LOCKS_GUARD = threading.Lock()
 
 
 DEFAULT_PROFILE = {
@@ -35,7 +40,7 @@ class LocalMemory:
         merged.update(profile)
         merged["work_keywords"] = _uniq(merged.get("work_keywords", []))
         merged["interest_keywords"] = _uniq(merged.get("interest_keywords", []))
-        self.profile_path.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_json(self.profile_path, merged)
         return merged
 
     def cards(self) -> list[dict[str, Any]]:
@@ -52,7 +57,7 @@ class LocalMemory:
         if not card.get("id"):
             card["id"] = _item_id(card["source_url"])
         rows.insert(0, card)
-        self.cards_path.write_text(json.dumps(rows[:200], ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_json(self.cards_path, rows[:200])
         return card
 
     def update_card(self, key: str, patch: dict[str, Any]) -> dict[str, Any] | None:
@@ -62,7 +67,7 @@ class LocalMemory:
                 merged = dict(row)
                 merged.update(patch)
                 rows[index] = merged
-                self.cards_path.write_text(json.dumps(rows[:200], ensure_ascii=False, indent=2), encoding="utf-8")
+                _write_json(self.cards_path, rows[:200])
                 return merged
         return None
 
@@ -75,7 +80,7 @@ class LocalMemory:
             "work": intel,
             "personal": for_you,
         }
-        self.feeds_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_json(self.feeds_path, payload)
 
     def feeds(self) -> dict[str, list]:
         if not self.feeds_path.exists():
@@ -99,7 +104,7 @@ class LocalMemory:
     def add_event(self, event: dict[str, Any]) -> dict[str, Any]:
         rows = self.events()
         rows.insert(0, event)
-        self.events_path.write_text(json.dumps(rows[:300], ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_json(self.events_path, rows[:300])
         return event
 
     def events(self) -> list[dict[str, Any]]:
@@ -119,10 +124,7 @@ class LocalMemory:
         ids = self.pushed_ids()
         if item_id not in ids:
             ids.append(item_id)
-        self.pushed_path.write_text(
-            json.dumps({"ids": ids[-200:]}, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        _write_json(self.pushed_path, {"ids": ids[-200:]})
 
 
 def _read_json(path: Path, default: Any) -> Any:
@@ -134,9 +136,28 @@ def _read_json(path: Path, default: Any) -> Any:
         return default
 
 
+def _json_lock(path: Path) -> threading.Lock:
+    key = str(path)
+    with _JSON_LOCKS_GUARD:
+        lock = _JSON_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _JSON_LOCKS[key] = lock
+        return lock
+
+
 def _write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    raw = json.dumps(payload, ensure_ascii=False, indent=2)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    with _json_lock(path):
+        try:
+            tmp.write_text(raw, encoding="utf-8")
+            os.replace(tmp, path)
+        except Exception:
+            if tmp.exists():
+                tmp.unlink()
+            raise
 
 
 def _uniq(values: list) -> list[str]:

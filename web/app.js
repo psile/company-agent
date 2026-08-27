@@ -8,20 +8,27 @@ const ICONS = {
   user: '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 19a7 7 0 0 1 14 0"/></svg>',
   gear: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3v2.2M4.7 7.2l1.9 1.1M17.4 15.7l1.9 1.1M4.7 16.8l1.9-1.1M17.4 8.3l1.9-1.1"/></svg>',
   chat: '<svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H10l-5 4v-4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/><path d="M8 10h8M8 13h5"/></svg>',
+  check: '<svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>',
+  doc: '<svg viewBox="0 0 24 24"><path d="M7 3h8l4 4v14H7z"/><path d="M15 3v5h5M9 13h6M9 17h6"/></svg>',
+  layers: '<svg viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5z"/><path d="m3 12 9 5 9-5"/><path d="m3 16 9 5 9-5"/></svg>',
 };
 
 const ROUTES = [
   { id: "home", href: "#/", label: "首页", icon: "home" },
   { id: "chat", href: "#/chat", label: "秘书对话", icon: "chat" },
+  { id: "work", href: "#/work", label: "我的工作", icon: "check" },
+  { id: "projects", href: "#/projects", label: "项目", icon: "layers" },
+  { id: "reports", href: "#/reports", label: "工作总结", icon: "doc" },
   { id: "recommend", href: "#/recommend", label: "为你推荐", icon: "star" },
   { id: "follows", href: "#/follows", label: "我的关注", icon: "heart" },
   { id: "goals", href: "#/goals", label: "目标管理", icon: "target" },
   { id: "knowledge", href: "#/knowledge", label: "知识库", icon: "book" },
-  { id: "toolbox", href: "#/toolbox", label: "工具箱", icon: "box" },
+  { id: "skills", href: "#/skills", label: "办公 Skills", icon: "box" },
 ];
 const SETTINGS_ITEMS = [
   { href: "#/settings/profile", label: "个人信息" },
   { href: "#/settings/security", label: "账号与安全" },
+  { href: "#/settings/llm", label: "大模型" },
   { href: "#/settings/prefs", label: "偏好设置" },
   { href: "#/settings/push", label: "推送与通知" },
   { href: "#/settings/privacy", label: "数据与隐私" },
@@ -58,6 +65,8 @@ const state = {
   chatMessages: [],
   conversationProfile: null,
   chatBusy: false,
+  reportType: "daily",
+  pendingChatExample: "",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -244,11 +253,14 @@ function renderChrome() {
     ${settingsNavHtml()}`;
   const total = Number(observe.total || 0) || 2847;
   const fetched = Number(observe.fetched || 0) || 42;
+  const llm = (dash.status && dash.status.llm) || {};
+  const llmOn = !!llm.enabled;
   $("engineCard").innerHTML = `
     <div class="engine-head"><span>记忆引擎状态</span><span class="okdot">● 正常</span></div>
     <p>已处理信息 <b>${total.toLocaleString()}</b> 条</p>
     <div class="bar"><span style="width:${Math.min(100, 18 + (total % 80))}%"></span></div>
-    <p>今日新增 ${fetched} 条</p>`;
+    <p>今日新增 ${fetched} 条</p>
+    <p class="tiny">大模型 ${llmOn ? "已接通" : "未接通"}${llm.model ? " · " + escapeHtml(llm.model) : ""}</p>`;
   const notices = dash.notifications || dash.events || [];
   $("noticeBadge").hidden = notices.length === 0;
   $("noticeBadge").textContent = String(Math.min(9, notices.length));
@@ -272,9 +284,13 @@ function pageChat() {
       }).join("")
     : `<div class="chat-empty"><h2>今天需要我做什么？</h2><p>直接告诉我你想关注的主题、最近在做的项目，或者询问最新推荐。</p>
         <div class="chat-starters">
+          <button type="button" data-chat-example="周五前把 Personal Agent PPT 做完，提醒我。">记下待办</button>
+          <button type="button" data-chat-example="明天下午提醒我发方案给老板。">约定提醒</button>
+          <button type="button" data-chat-example="给我今天的工作重点。">今日重点</button>
+          <button type="button" data-chat-example="这个项目现在进展怎么样？">项目进展</button>
+          <button type="button" data-chat-example="生成今天日报。">今日日报</button>
+          <button type="button" data-chat-example="帮我拆一下这个任务。">拆解任务</button>
           <button type="button" data-chat-example="最近帮我关注 Agent Memory、Mem0 和 MemOS，有重要论文再告诉我。">建立关注</button>
-          <button type="button" data-chat-example="最近 Agent Memory 有什么值得看的？">查询推荐</button>
-          <button type="button" data-chat-example="我最近主要在做个人 AI 秘书和 Agent Memory。">记住我的工作</button>
         </div></div>`;
   return `
     <div class="page-head chat-page-head">
@@ -287,7 +303,7 @@ function pageChat() {
         <div class="chat-session-list">${sessions.length ? sessions.map((session) => `<button type="button" data-chat-session="${escapeHtml(session.id)}" class="chat-session${session.id === state.activeSessionId ? " is-on" : ""}"><b>${escapeHtml(session.title || "新对话")}</b><span>${escapeHtml(fmtTime(session.updated_at))}</span></button>`).join("") : '<p class="tiny">还没有历史会话</p>'}</div>
       </aside>
       <section class="chat-main">
-        <div class="chat-messages" id="chatMessages">${messageHtml}${state.chatBusy ? '<div class="chat-message is-agent"><div class="chat-role">秘书 Agent</div><div class="chat-bubble is-thinking">正在理解并调用工具…</div></div>' : ""}</div>
+        <div class="chat-messages" id="chatMessages">${messageHtml}${state.chatBusy ? '<div class="chat-message is-agent"><div class="chat-role">秘书 Agent</div><div class="chat-bubble is-thinking">正在回复…</div></div>' : ""}</div>
         <form class="chat-compose" id="chatForm">
           <textarea id="chatInput" rows="3" placeholder="输入消息，Enter 发送，Shift + Enter 换行" ${state.chatBusy ? "disabled" : ""}></textarea>
           <button class="btn chat-send" type="submit" ${state.chatBusy ? "disabled" : ""}>发送</button>
@@ -319,10 +335,18 @@ function profileOptions(items, selected) {
   return items.map(([value, label]) => `<option value="${value}"${selected === value ? " selected" : ""}>${label}</option>`).join("");
 }
 
+function workDesk() {
+  const memory = (state.dash || {}).work_memory;
+  if (memory && typeof memory === "object" && !Array.isArray(memory)) return memory;
+  return {};
+}
+
 function pageHome() {
   const dash = state.dash;
-  const observe = dash.observe || {};
   const stats = dash.stats || {};
+  const desk = workDesk();
+  const openTasks = desk.open_tasks || desk.today || [];
+  const brief = desk.brief || "";
   const items = (dash.for_you || []).filter(matchQuery).slice(0, 5);
   const goals = dash.goals || [];
   const today = goals.find((g) => g.kind === "today") || goals[0];
@@ -332,8 +356,8 @@ function pageHome() {
   return `
     <div class="page-head">
       <div>
-        <h1>${greeting()}，今天我替你关注了 ${observe.fetched || 0} 条信息，为你筛选出 ${dash.for_you?.length || 0} 条真正值得关注的内容。</h1>
-        <p>Agent 在后台持续观察世界，再按你的项目、目标和兴趣决定推什么。</p>
+        <h1>${greeting()}，今天有 ${openTasks.length || 0} 件工作值得优先关注。</h1>
+        <p>秘书会记住你的事项，结合截止日期和进度主动提醒，同时继续观察与当前项目相关的资料。</p>
       </div>
       <div class="actions">
         <button class="btn" id="refreshBtn" type="button">刷新源</button>
@@ -348,6 +372,13 @@ function pageHome() {
     </div>
     <div class="layout">
       <section class="stack">
+        ${brief ? `<div class="card work-brief"><div class="page-head" style="margin:0 0 12px"><h2 style="margin:0">今日工作重点</h2><a class="tiny" href="#/work">我的工作</a></div><pre class="brief-copy">${escapeHtml(brief)}</pre></div>` : ""}
+        <div class="card">
+          <div class="page-head" style="margin:0 0 12px">
+            <h2 style="margin:0">今日待办</h2>
+          </div>
+          ${openTasks.length ? `<ol class="work-todo">${openTasks.slice(0, 5).map((task, index) => `<li><a href="#/work"><b>${index + 1}. ${escapeHtml(task.title || "")}</b></a><span>${escapeHtml(task.deadline ? "截止 " + task.deadline.slice(0, 10) : (task.priority || ""))} · ${escapeHtml(task.project || "当前项目")}</span></li>`).join("")}</ol>` : '<p class="tiny">还没有待办。在对话里说「周五前把 PPT 做完」就会记下来。</p>'}
+        </div>
         <div class="card">
           <div class="page-head" style="margin:0 0 12px">
             <h2 style="margin:0">今日为你发现</h2>
@@ -535,6 +566,181 @@ function pageFollows() {
     </div>`;
 }
 
+function pageWork() {
+  const desk = workDesk();
+  const tasks = desk.tasks || [];
+  const notes = desk.notes || [];
+  const reminders = desk.reminders || [];
+  const roots = tasks.filter((task) => !task.parent_task_id);
+  const childrenOf = {};
+  for (const task of tasks) {
+    if (!task.parent_task_id) continue;
+    (childrenOf[task.parent_task_id] = childrenOf[task.parent_task_id] || []).push(task);
+  }
+  const pri = { urgent: "紧急", high: "高", medium: "中", low: "低" };
+  const st = { todo: "待办", in_progress: "进行中", blocked: "阻塞", done: "完成", cancelled: "取消" };
+  const rtype = { deadline: "截止", progress: "进度", morning: "晨间", risk: "风险", manual: "约定" };
+  const rst = { pending: "待发送", sent: "已发送", cancelled: "已取消", skipped: "已跳过" };
+  const card = (task) => {
+    const kids = childrenOf[task.id] || [];
+    return `<article class="task-card">
+      <div class="item-top"><b>${escapeHtml(task.title || "")}</b><span class="tag ${task.priority === "high" || task.priority === "urgent" ? "orange" : "gray"}">${pri[task.priority] || "中"}</span></div>
+      <p class="tiny">${escapeHtml(task.project || "当前项目")} · ${escapeHtml(task.deadline ? "截止 " + task.deadline.slice(0, 10) : "无截止日期")} · ${escapeHtml(st[task.status] || task.status)} · ${escapeHtml(task.source_type || "manual")}</p>
+      <div class="task-actions">
+        ${task.status !== "done" && task.status !== "cancelled" ? `<button class="btn-ghost" type="button" data-task-id="${escapeHtml(task.id)}" data-task-act="start">开始</button>` : ""}
+        ${task.status !== "done" && task.status !== "cancelled" ? `<button class="btn-ghost" type="button" data-task-id="${escapeHtml(task.id)}" data-task-act="done">完成</button>` : ""}
+        <button class="btn-ghost" type="button" data-task-id="${escapeHtml(task.id)}" data-task-act="breakdown">拆解</button>
+      </div>
+      ${kids.length ? `<ul class="task-kids">${kids.map((child) => `<li>${escapeHtml(child.title)} · ${escapeHtml(st[child.status] || "")}</li>`).join("")}</ul>` : ""}
+    </article>`;
+  };
+  return `
+    <div class="page-head">
+      <div>
+        <h1>我的工作</h1>
+        <p>对话里说出事项，我会记成待办，并结合项目进度主动提醒。</p>
+      </div>
+    </div>
+    <div class="layout">
+      <section class="stack">
+        <div class="card">
+          <div class="page-head" style="margin:0 0 12px"><h2 style="margin:0">任务</h2><span class="tiny">${roots.filter((row) => row.status !== "done").length} 件进行中</span></div>
+          ${roots.length ? roots.map((task) => card(task)).join("") : '<p class="tiny">还没有任务。去对话页说「周五前把 PPT 做完，提醒我。」</p>'}
+        </div>
+      </section>
+      <aside class="stack">
+        <section class="card">
+          <h3>提醒</h3>
+          ${reminders.length ? reminders.slice(0, 6).map((row) => `<article class="remind-item"><div class="item-top"><b>${escapeHtml(rtype[row.reminder_type] || "提醒")}</b><span class="tag ${row.status === "sent" ? "green" : "gray"}">${escapeHtml(rst[row.status] || row.status)}</span></div><p class="tiny">${escapeHtml((row.generated_content || row.trigger_at || "").slice(0, 120))}</p></article>`).join("") : '<p class="tiny">有截止日期的任务会在 24 小时和 3 小时前结合进度提醒你。</p>'}
+        </section>
+        <section class="card">
+          <h3>工作记录</h3>
+          ${notes.length ? notes.slice(0, 6).map((note) => `<p class="tiny">${escapeHtml(note.content || "")}</p>`).join("") : '<p class="tiny">还没有工作备忘。</p>'}
+        </section>
+        <section class="card">
+          <h3>目标</h3>
+          <p class="tiny">目标仍是推荐上下文，任务才是要推进的事项。</p>
+          <a class="btn-ghost" href="#/goals">打开目标管理</a>
+        </section>
+      </aside>
+    </div>`;
+}
+
+function pageReports() {
+  const desk = workDesk();
+  const kind = state.reportType || "daily";
+  const tabs = [
+    ["daily", "今日日报"],
+    ["weekly", "本周周报"],
+    ["monthly", "月度总结"],
+    ["project_summary", "项目总结"],
+  ];
+  const reports = (desk.reports || []).filter((row) => row.report_type === kind);
+  const current = reports[0];
+  const src = (current && current.sources) || {};
+  const labels = { tasks: "Task", events: "工作事件", notes: "工作记录", goals: "目标", knowledge: "知识条目", decisions: "Decision", recommendations: "相关推荐" };
+  return `
+    <div class="page-head">
+      <div>
+        <h1>工作总结</h1>
+        <p>根据 Task、工作事件、目标和知识库自动汇总，而不是让你从空白文档写起。</p>
+      </div>
+      <div class="actions">
+        <button class="btn" id="generateReportBtn" type="button">一键生成</button>
+        ${current ? `<button class="btn-ghost" id="copyReportBtn" type="button">复制</button>
+        <button class="btn-ghost" id="exportReportBtn" type="button">导出</button>` : ""}
+      </div>
+    </div>
+    <div class="tabs">
+      ${tabs.map(([id, label]) => `<button class="tab${kind === id ? " is-on" : ""}" data-report-tab="${id}" type="button">${label}</button>`).join("")}
+    </div>
+    <div class="layout" style="margin-top:16px">
+      <section class="card">
+        ${current ? `<div class="page-head" style="margin:0 0 12px"><h2 style="margin:0">${escapeHtml(current.title || tabs.find((row) => row[0] === kind)?.[1] || "报告")}</h2><span class="tiny">${escapeHtml(fmtTime(current.created_at))}</span></div>
+          <pre class="report-copy" id="reportContent">${escapeHtml(current.content || "")}</pre>
+          <div class="field" style="margin-top:14px"><label>编辑</label><textarea id="reportEditor" rows="8">${escapeHtml(current.content || "")}</textarea></div>
+          <button class="btn-ghost" id="saveReportBtn" type="button" data-report-id="${escapeHtml(current.id)}">保存修改</button>` : `<p class="tiny">还没有这份总结。点「一键生成」，我会从你的待办、事件和项目记忆里汇总。</p>`}
+      </section>
+      <aside class="stack">
+        <section class="card">
+          <h3>本次使用数据</h3>
+          ${current ? Object.entries(labels).map(([key, label]) => `<p>${src[key] || 0} 个${label}</p>`).join("") : "<p class='tiny'>生成后会列出用了多少 Task、事件和知识。</p>"}
+        </section>
+        <section class="card">
+          <h3>历史</h3>
+          ${reports.length ? reports.slice(0, 5).map((row) => `<p class="tiny">${escapeHtml(row.title || "")}</p>`).join("") : "<p class='tiny'>每次生成都会留下一版，方便对照。</p>"}
+        </section>
+      </aside>
+    </div>`;
+}
+
+function pageProjects() {
+  const tracker = state.dash.tracker || {};
+  const progress = Number(tracker.estimated_progress || 0);
+  const done = tracker.completed || [];
+  const doing = tracker.in_progress || [];
+  const risks = tracker.risks || [];
+  const steps = tracker.next_steps || [];
+  const goals = tracker.goals || [];
+  const knowledge = tracker.knowledge || [];
+  const events = tracker.events || [];
+  return `
+    <div class="page-head">
+      <div>
+        <h1>${escapeHtml(tracker.project || "当前项目")}</h1>
+        <p>进度由任务完成情况、目标进度和工作事件估算，不是手填精确值。</p>
+      </div>
+      <a class="btn-ghost" href="#/work">打开待办</a>
+    </div>
+    <div class="stats">
+      ${stat("状态", tracker.status || "进行中", escapeHtml(tracker.stage || "当前阶段"))}
+      ${stat("估算进度", progress + "%", tracker.progress_basis || "tasks+goals+events")}
+      ${stat("进行中", (tracker.counts || {}).open || doing.length, "根任务")}
+      ${stat("已完成", (tracker.counts || {}).done || done.length, "根任务")}
+    </div>
+    <div class="layout">
+      <section class="stack">
+        <div class="card">
+          <h2>整体进度</h2>
+          <div class="barline"><span style="width:${progress}%"></span></div>
+          <p class="tiny">约 ${progress}% · 估算</p>
+          ${tracker.target ? `<p>目标：${escapeHtml(tracker.target)}</p>` : ""}
+        </div>
+        <div class="card">
+          <h2>已完成</h2>
+          ${done.length ? `<ul class="track-list">${done.map((row) => `<li>✓ ${escapeHtml(row.title || "")}</li>`).join("")}</ul>` : '<p class="tiny">还没有标记完成的任务。</p>'}
+        </div>
+        <div class="card">
+          <h2>进行中</h2>
+          ${doing.length ? `<ul class="track-list">${doing.map((row) => `<li>• ${escapeHtml(row.title || "")}</li>`).join("")}</ul>` : '<p class="tiny">没有进行中的任务。</p>'}
+        </div>
+        <div class="card">
+          <h2>风险</h2>
+          ${risks.length ? `<ul class="track-list">${risks.map((row) => `<li>! ${escapeHtml(row)}</li>`).join("")}</ul>` : '<p class="tiny">暂无记录中的风险。</p>'}
+        </div>
+        <div class="card">
+          <h2>下一步建议</h2>
+          ${steps.length ? `<ol class="work-todo">${steps.map((row) => `<li>${escapeHtml(row)}</li>`).join("")}</ol>` : '<p class="tiny">先确认当前最紧急的待办。</p>'}
+        </div>
+      </section>
+      <aside class="stack">
+        <section class="card">
+          <h3>目标</h3>
+          ${goals.length ? goals.slice(0, 4).map((goal) => `<p class="tiny">${escapeHtml(goal.title || "")} · ${escapeHtml(String(goal.progress || 0))}%</p>`).join("") : '<p class="tiny">还没有目标。</p>'}
+          <a class="btn-ghost" href="#/goals">目标管理</a>
+        </section>
+        <section class="card">
+          <h3>知识</h3>
+          ${knowledge.length ? knowledge.map((row) => `<p class="tiny">${escapeHtml(row.title || "")}</p>`).join("") : '<p class="tiny">还没有和该项目匹配的知识条目。</p>'}
+        </section>
+        <section class="card">
+          <h3>最近事件</h3>
+          ${events.length ? events.slice(0, 6).map((row) => `<p class="tiny">${escapeHtml(row.title || row.event_type || "")}</p>`).join("") : '<p class="tiny">还没有工作事件。</p>'}
+        </section>
+      </aside>
+    </div>`;
+}
+
 function pageGoals() {
   const goals = state.dash.goals || [];
   const groups = [
@@ -647,20 +853,38 @@ function knowledgeDetail(card) {
     </div>`;
 }
 
-function pageToolbox() {
-  const tools = ["日报生成","待办事项","日期计算","习惯打卡","收藏管理","文章摘要","论文阅读"];
+function pageSkills() {
+  const skills = state.dash.skills || [];
+  const enabled = skills.filter((row) => row.status === "enabled");
+  const soon = skills.filter((row) => row.status !== "enabled");
+  const card = (row) => {
+    const ready = row.status === "enabled";
+    return `<article class="skill-card${ready ? "" : " is-soon"}" ${ready ? `data-skill="${escapeHtml(row.id)}"` : ""}>
+      <div class="item-top"><b>${escapeHtml(row.title || row.name || "")}</b><span class="tag ${ready ? "green" : ""}">${ready ? "已启用" : "Coming Soon"}</span></div>
+      <p class="tiny">${escapeHtml(row.name || "")}</p>
+      <p>${escapeHtml(row.summary || "")}</p>
+      ${ready ? `<button class="btn-ghost" type="button" data-skill="${escapeHtml(row.id)}">${row.example ? "在对话中试用" : "打开"}</button>` : ""}
+    </article>`;
+  };
   return `
     <div class="page-head">
       <div>
-        <h1>工具箱</h1>
-        <p>当前 Demo 重点是 Recommendation Skill。这些入口为未来 Skills 预留。</p>
+        <h1>办公 Skills</h1>
+        <p>秘书能力按 Skill 接入。已启用的可以直接用，其余先占位，不会再做成日期计算器或打卡小工具。</p>
       </div>
     </div>
-    <div class="grid-cards">${tools.map((name) => `<div class="mini"><b>${name}</b><div class="tiny">Skill 即将接入</div><span class="tag">Coming soon</span></div>`).join("")}</div>
+    <section class="card">
+      <h2>已启用</h2>
+      <div class="skill-grid">${enabled.map(card).join("")}</div>
+    </section>
     <section class="card" style="margin-top:16px">
-      <h3>Skill 架构预留</h3>
-      <p>Personal Agent → Recommendation / Research / Planning / Daily Report / Feishu / Future Skills</p>
+      <h2>即将推出</h2>
+      <div class="skill-grid">${soon.map(card).join("")}</div>
     </section>`;
+}
+
+function pageToolbox() {
+  return pageSkills();
 }
 
 function pageProfile() {
@@ -875,6 +1099,44 @@ function pageSettingsSecurity() {
     </section>`;
 }
 
+function pageSettingsLlm() {
+  const llm = state.dash.llm_settings || (state.dash.status && state.dash.status.llm) || {};
+  const sourceLabels = {
+    settings: "系统设置",
+    env: "环境变量",
+    "data/llm.json": "系统设置",
+    "RadarME/js/config.js": "RadarME 配置",
+    none: "未配置",
+  };
+  const source = sourceLabels[llm.source] || llm.source || "未配置";
+  const presets = llm.presets || [];
+  return `
+    <div class="page-head">
+      <div>
+        <h1>大模型</h1>
+        <p>配置 OpenAI 兼容网关和 API Key。密钥只保存在本机 data/llm.json，接口不会把完整密钥再读出来。</p>
+      </div>
+    </div>
+    <section class="card" style="max-width:640px">
+      <div class="toggle">
+        <div><b>启用大模型</b><div class="tiny">关闭后，对话路由、任务抽取和推荐重排会退回启发式。</div></div>
+        <button class="switch${llm.enabled ? " is-on" : ""}" id="llmEnabledBtn" type="button"><i></i></button>
+      </div>
+      <p class="feishu-verify ${llm.active ? "is-ok" : ""}">${llm.active ? "当前已接通：" : "尚未接通："}${escapeHtml(llm.model || "未选择模型")} · 来源 ${escapeHtml(source)}</p>
+      <div class="field"><label>快捷预设</label>
+        <div class="chips">${presets.map((row) => `<button class="chip" data-llm-preset="${escapeHtml(row.id)}" type="button">${escapeHtml(row.label)}</button>`).join("")}</div>
+      </div>
+      <div class="field"><label>网关地址</label><input id="llmBaseUrl" value="${escapeHtml(llm.base_url || "")}" placeholder="https://api.siliconflow.cn/v1" /></div>
+      <div class="field"><label>模型名</label><input id="llmModel" value="${escapeHtml(llm.model || "")}" placeholder="deepseek-ai/DeepSeek-V4-Flash" /></div>
+      <div class="field"><label>API Key</label><input id="llmApiKey" type="password" autocomplete="off" placeholder="${llm.api_key_set ? "已保存，留空则不修改" : "填写 API Key；本地网关可留空"}" /></div>
+      <p class="hint">支持硅基流动、OpenAI 以及任何 OpenAI 兼容网关。本地 127.0.0.1 / localhost 可不填 Key。</p>
+      <div class="row-actions">
+        <button class="btn" id="saveLlmBtn" type="button">保存</button>
+        <button class="btn-ghost" id="testLlmBtn" type="button">测试连接</button>
+      </div>
+    </section>`;
+}
+
 function pageSettingsPrefs() {
   const dash = state.dash;
   const push = dash.push_settings || {};
@@ -941,16 +1203,21 @@ function pageSettingsMembers() {
 const PAGES = {
   "/": pageHome,
   "/chat": pageChat,
+  "/work": pageWork,
+  "/projects": pageProjects,
+  "/reports": pageReports,
   "/recommend": pageRecommend,
   "/follows": pageFollows,
   "/goals": pageGoals,
   "/knowledge": pageKnowledge,
-  "/toolbox": pageToolbox,
+  "/skills": pageSkills,
+  "/toolbox": pageSkills,
   "/profile": pageProfile,
   "/settings": pageSettingsPush,
   "/settings/push": pageSettingsPush,
   "/settings/profile": pageSettingsProfile,
   "/settings/security": pageSettingsSecurity,
+  "/settings/llm": pageSettingsLlm,
   "/settings/prefs": pageSettingsPrefs,
   "/settings/privacy": pageSettingsPrivacy,
   "/settings/members": pageSettingsMembers,
@@ -959,12 +1226,17 @@ const PAGES = {
 function currentRoute() {
   const hash = location.hash.replace("#", "") || "/";
   if (hash === "/settings") return "/settings/push";
+  if (hash === "/toolbox") return "/skills";
   return PAGES[hash] ? hash : "/";
 }
 
 function render() {
   if ((location.hash.replace("#", "") || "/") === "/settings") {
     location.hash = "#/settings/push";
+    return;
+  }
+  if ((location.hash.replace("#", "") || "/") === "/toolbox") {
+    location.hash = "#/skills";
     return;
   }
   state.route = currentRoute();
@@ -975,6 +1247,11 @@ function render() {
   }
   const view = PAGES[state.route] || pageHome;
   $("page").innerHTML = view();
+  if (state.pendingChatExample && $("chatInput")) {
+    $("chatInput").value = state.pendingChatExample;
+    $("chatInput").focus();
+    state.pendingChatExample = "";
+  }
 }
 
 async function load() {
@@ -1046,7 +1323,7 @@ async function refreshFeeds(btn) {
 }
 
 document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-act],[data-open],[data-rectab],[data-filter],[data-cat],[data-card],[data-topic],[data-example],[data-toggle],[data-move],[data-followkind],[data-chat-session],[data-chat-example],#newChatBtn,#saveConversationProfileBtn,#refreshBtn,#refreshBtn2,#followBtn,#addGoalBtn,#savePrefBtn,#savePushBtn,#pushNowBtn,#briefBtn,#noticeBtn,#saveProfileBtn,#exportBtn,#addProductBtn,#addSourceBtn,#addFollowGoalBtn,#logoutBtn,#savePassBtn,#saveFeishuBtn");
+  const t = event.target.closest("[data-act],[data-open],[data-rectab],[data-filter],[data-cat],[data-card],[data-topic],[data-example],[data-toggle],[data-move],[data-followkind],[data-chat-session],[data-chat-example],[data-task-act],[data-report-tab],[data-skill],[data-llm-preset],#newChatBtn,#saveConversationProfileBtn,#refreshBtn,#refreshBtn2,#followBtn,#addGoalBtn,#savePrefBtn,#savePushBtn,#pushNowBtn,#briefBtn,#noticeBtn,#saveProfileBtn,#exportBtn,#addProductBtn,#addSourceBtn,#addFollowGoalBtn,#logoutBtn,#savePassBtn,#saveFeishuBtn,#llmEnabledBtn,#saveLlmBtn,#testLlmBtn,#generateReportBtn,#copyReportBtn,#exportReportBtn,#saveReportBtn");
   if (!t) return;
   if (t.dataset.chatSession) {
     state.activeSessionId = t.dataset.chatSession;
@@ -1083,6 +1360,60 @@ document.addEventListener("click", async (event) => {
     $("noticePop").hidden = !$("noticePop").hidden;
     return;
   }
+  if (t.dataset.reportTab) {
+    state.reportType = t.dataset.reportTab;
+    return render();
+  }
+  if (t.id === "generateReportBtn") {
+    await api("/api/work/reports/generate", { method: "POST", body: JSON.stringify({ report_type: state.reportType || "daily" }) });
+    toast("已根据当前工作记忆生成总结。");
+    return load();
+  }
+  if (t.id === "copyReportBtn") {
+    const text = $("reportContent")?.textContent || $("reportEditor")?.value || "";
+    if (!text) return toast("还没有可复制的内容");
+    await navigator.clipboard.writeText(text).catch(() => {});
+    toast("已复制到剪贴板。");
+    return;
+  }
+  if (t.id === "exportReportBtn") {
+    const text = $("reportEditor")?.value || $("reportContent")?.textContent || "";
+    if (!text) return toast("还没有可导出的内容");
+    const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${state.reportType || "daily"}-report.md`;
+    a.click();
+    toast("已导出 Markdown。");
+    return;
+  }
+  if (t.id === "saveReportBtn") {
+    const id = t.dataset.reportId;
+    const content = $("reportEditor")?.value || "";
+    if (!id) return toast("没有可保存的报告");
+    await api(`/api/work/reports/${id}`, { method: "PUT", body: JSON.stringify({ content }) });
+    toast("已保存修改。");
+    return load();
+  }
+  if (t.dataset.skill) {
+    const skill = (state.dash.skills || []).find((row) => row.id === t.dataset.skill);
+    if (!skill || skill.status !== "enabled") {
+      toast("这个 Skill 即将推出。");
+      return;
+    }
+    if (skill.report_type) state.reportType = skill.report_type;
+    if (skill.example) {
+      state.pendingChatExample = skill.example;
+      if (location.hash === "#/chat") {
+        render();
+        return;
+      }
+      location.hash = "#/chat";
+      return;
+    }
+    location.hash = skill.href || "#/skills";
+    return;
+  }
   if (t.id === "logoutBtn") {
     await api("/api/auth/logout", { method: "POST", body: "{}" }).catch(() => {});
     state.token = "";
@@ -1092,7 +1423,18 @@ document.addEventListener("click", async (event) => {
     toast("已退出");
     return;
   }
-  if (t.id === "refreshBtn" || t.id === "refreshBtn2" || t.id === "briefBtn") return refreshFeeds(t);
+  if (t.dataset.taskAct && t.dataset.taskId) {
+    const id = t.dataset.taskId;
+    if (t.dataset.taskAct === "breakdown") {
+      const out = await api(`/api/work/tasks/${id}/breakdown`, { method: "POST", body: "{}" });
+      toast(`已拆成 ${(out.items || []).length} 步`);
+      return load();
+    }
+    const status = t.dataset.taskAct === "done" ? "done" : "in_progress";
+    await api(`/api/work/tasks/${id}`, { method: "PUT", body: JSON.stringify({ status }) });
+    toast(status === "done" ? "已完成" : "已开始");
+    return load();
+  }
   if (t.dataset.act) return act(t.dataset.id, t.dataset.act);
   if (t.dataset.open) return act(t.dataset.open, "open");
   if (t.dataset.rectab) {
@@ -1199,6 +1541,51 @@ document.addEventListener("click", async (event) => {
       return;
     }
   }
+  if (t.id === "llmEnabledBtn") {
+    t.classList.toggle("is-on");
+    return;
+  }
+  if (t.dataset.llmPreset) {
+    const llm = state.dash.llm_settings || {};
+    const preset = (llm.presets || []).find((row) => row.id === t.dataset.llmPreset);
+    if (!preset) return;
+    if ($("llmBaseUrl")) $("llmBaseUrl").value = preset.base_url || "";
+    if ($("llmModel")) $("llmModel").value = preset.model || "";
+    return;
+  }
+  if (t.id === "saveLlmBtn") {
+    try {
+      await api("/api/settings/llm", { method: "PUT", body: JSON.stringify({
+        enabled: $("llmEnabledBtn") ? $("llmEnabledBtn").classList.contains("is-on") : true,
+        base_url: $("llmBaseUrl").value.trim(),
+        model: $("llmModel").value.trim(),
+        api_key: $("llmApiKey").value,
+      }) });
+      if ($("llmApiKey")) $("llmApiKey").value = "";
+      toast("大模型设置已保存。");
+      return load();
+    } catch (err) {
+      toast(err.message || "保存大模型设置失败");
+      return;
+    }
+  }
+  if (t.id === "testLlmBtn") {
+    try {
+      await api("/api/settings/llm", { method: "PUT", body: JSON.stringify({
+        enabled: $("llmEnabledBtn") ? $("llmEnabledBtn").classList.contains("is-on") : true,
+        base_url: $("llmBaseUrl").value.trim(),
+        model: $("llmModel").value.trim(),
+        api_key: $("llmApiKey").value,
+      }) });
+      if ($("llmApiKey")) $("llmApiKey").value = "";
+      const out = await api("/api/settings/llm/test", { method: "POST", body: "{}" });
+      toast(out.ok ? `连接成功：${out.reply || "ok"}` : (out.reason || "连接失败"));
+      return load();
+    } catch (err) {
+      toast(err.message || "测试大模型连接失败");
+      return;
+    }
+  }
   if (t.id === "exportBtn") {
     const blob = new Blob([JSON.stringify(state.dash, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
@@ -1276,6 +1663,9 @@ document.addEventListener("submit", async (event) => {
       session_id: state.activeSessionId,
     }) });
     state.activeSessionId = out.session_id;
+    if (out.intent === "create_task" || out.intent === "breakdown_task" || out.intent === "update_task" || out.intent === "create_reminder" || out.intent === "generate_report" || out.intent === "query_project") {
+      state.dash = await api("/api/dashboard");
+    }
     await loadChatState(false);
   } catch (err) {
     toast(err.message || "对话失败，请稍后重试。");

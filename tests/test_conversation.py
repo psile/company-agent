@@ -97,3 +97,32 @@ def test_proactive_policy_uses_profile_and_penalties():
     assert high.decision == "push_now"
     assert duplicate.decision != "push_now"
     assert high.score > duplicate.score
+
+
+def test_general_chat_fallback_varies_without_llm(tmp_path, monkeypatch):
+    svc = _svc(tmp_path, monkeypatch)
+    hello = _chat(svc, "bob", "你好")
+    who = _chat(svc, "bob", "你是谁")
+    can = _chat(svc, "bob", "可以帮我做什么")
+    remember = _chat(svc, "bob", "可以记录其他事情吗")
+    assert hello["intent"] == "general_chat"
+    assert who["reply"] != hello["reply"]
+    assert can["reply"] != hello["reply"]
+    assert remember["reply"] != hello["reply"]
+    assert "个人工作秘书" in who["reply"]
+    assert "关注主题" in can["reply"]
+    assert "记住" in remember["reply"]
+
+
+def test_smalltalk_skips_intent_llm(tmp_path, monkeypatch):
+    svc = _svc(tmp_path, monkeypatch)
+    routed = []
+
+    def fake_json(*_args, **_kwargs):
+        routed.append("json")
+        return {"intent": "unknown", "confidence": 0.1, "entities": {}}
+
+    monkeypatch.setattr("radar.agent.llm.chat_json", fake_json)
+    out = _chat(svc, "bob", "我可以叫你小鲸吗")
+    assert out["intent"] == "general_chat"
+    assert routed == []

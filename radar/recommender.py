@@ -8,6 +8,7 @@ from email.utils import parsedate_to_datetime
 from typing import Any
 
 from . import llm
+from .retrieve import related, text_similarity
 
 
 SOURCE_TRUST = {
@@ -86,13 +87,16 @@ def score_parts(item: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
     interest_score = 0.0
     for row in interests:
         topic = str(row.get("topic") or "")
-        if topic and _overlap(blob, topic):
+        if topic and related(blob, topic, 0.28):
             matched.append(topic)
             interest_score = max(interest_score, float(row.get("weight") or 0))
     project_topics = list(project.get("topics") or []) + [str(project.get("project") or "")]
-    project_hit = any(_overlap(blob, topic) for topic in project_topics if topic)
+    project_hit = any(related(blob, topic, 0.28) for topic in project_topics if topic)
     project_score = 0.85 if project_hit else 0.15
-    semantic = _jaccard(blob, " ".join(matched + project_topics))
+    semantic = max(
+        (text_similarity(blob, topic) for topic in matched + project_topics if topic),
+        default=0.15,
+    )
     fresh = freshness(item.get("published_at") or "")
     quality = _quality(item)
     feedback = _feedback(item, behavior)
@@ -287,21 +291,11 @@ def _blob(item: dict[str, Any]) -> str:
 
 
 def _overlap(blob: str, topic: str) -> bool:
-    needle = topic.lower().strip()
-    if not needle:
-        return False
-    if needle in blob:
-        return True
-    tokens = [t for t in re.split(r"[\s/_-]+", needle) if len(t) > 2]
-    return bool(tokens) and all(token in blob for token in tokens)
+    return related(blob, topic)
 
 
 def _jaccard(left: str, right: str) -> float:
-    a = set(re.findall(r"[a-z0-9\u4e00-\u9fff]{2,}", left.lower()))
-    b = set(re.findall(r"[a-z0-9\u4e00-\u9fff]{2,}", right.lower()))
-    if not a or not b:
-        return 0.15
-    return len(a & b) / len(a | b)
+    return text_similarity(left, right)
 
 
 def _parse_time(value: str) -> datetime | None:

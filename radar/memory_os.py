@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from . import llm
-from .store import LocalMemory, _uniq
+from .store import LocalMemory, _uniq, _write_json
 
 
 SHORT_CAP = 10
@@ -158,7 +158,7 @@ class HierarchicalMemory:
             return default
 
     def _write(self, path: Path, payload: Any) -> None:
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_json(path, payload)
 
 
 def try_memoryos_status(user_id: str = "me") -> dict[str, Any]:
