@@ -1,0 +1,11 @@
+[observe] 后台感知 interval=180m on_start=0
+[remind] 后台提醒 interval=1m on_start=1
+[feishu-inbox] 已按手机号绑定账号 bob
+[feishu-inbox] 长连接已启动 default_user=bob。飞书里发「你好」应收到秘书回复。
+个人工作秘书 Agent  http://0.0.0.0:8765/
+Remember · Observe · Act  |  登录后使用  |  飞书里可以直接对话
+[remind] 启动扫描 sent=0
+[radar] "POST /api/auth/login HTTP/1.1" 200 -
+[radar] "POST /api/auth/login HTTP/1.1" 200 -
+[radar] "GET /api/follows/overview HTTP/1.1" 200 -
+[Lark] [2026-08-30 23:07:30,382] [INFO] connected to wss://msg-frontier.feishu.cn/ws/v2?fpid=493&aid=552564&device_id=7679841512486784240&access_key=3fd772a0760a71218e151a75002c97d2&service_id=33554678&ticket=7fca4c4f-ed68-404d-8148-ca09aee8fb73 [conn_id=7679841512486784240]

@@ -799,3 +799,32 @@ button { cursor: pointer; }
 .history-month b { display: block; font-size: 13px; margin-bottom: 4px; }
 .history-month a { display: inline-block; margin-right: 10px; }
 details.card > summary { margin-bottom: 10px; }
+
+/* Follows page briefs and actions */
+.follow-brief { margin: 8px 0 4px; font-size: 12px; line-height: 1.5; color: var(--ink); }
+.follow-brief b { display: inline-block; margin-right: 6px; font-size: 11px; color: var(--brand); background: var(--brand-soft); border-radius: 4px; padding: 1px 6px; }
+.follow-brief .tiny { display: block; color: var(--muted); margin-top: 2px; }
+.row-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.row-actions .btn-ghost { font-size: 12px; padding: 3px 10px; }
+.mini .field { margin-bottom: 8px; }
+.mini .field input, .mini .field select { font-size: 13px; }
+
+/* Goals editing */
+.item.edit-mode { background: var(--brand-soft); border-radius: 8px; padding: 12px; margin-top: 8px; }
+.item-edit .field { margin-bottom: 6px; }
+.item-edit .field input, .item-edit .field select { font-size: 13px; width: 100%; }
+.goal-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }
+
+/* Goals editing */
+.item.edit-mode { background: var(--brand-soft); border-radius: 8px; padding: 12px; margin-top: 8px; }
+.item-edit .field { margin-bottom: 6px; }
+.item-edit .field input, .item-edit .field select { font-size: 13px; width: 100%; }
+CLAUDECODE_EVAL
+ < /dev/null && pwd -P >| /C/Users/UID05446/AppData/Local/Temp/claude-shell-4d59-cwd
+
+
+/* Goals editing */
+.item.edit-mode { background: var(--brand-soft); border-radius: 8px; padding: 12px; margin-top: 8px; }
+.item-edit .field { margin-bottom: 6px; }
+.item-edit .field input, .item-edit .field select { font-size: 13px; width: 100%; }
+.goal-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }

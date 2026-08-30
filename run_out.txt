@@ -7,3 +7,46 @@ Remember · Observe · Act  |  登录后使用  |  飞书里可以直接对话
 [remind] 启动扫描 sent=0
 [radar] "POST /api/auth/login HTTP/1.1" 200 -
 [Lark] [2026-08-30 18:54:15,981] [INFO] connected to wss://msg-frontier.feishu.cn/ws/v2?fpid=493&aid=552564&device_id=7679776247711058896&access_key=046503f43a52982c84eba8cb51b53392&service_id=33554678&ticket=2df915be-d883-4557-a594-95ce8cfce05f [conn_id=7679776247711058896]
+[radar] "GET /? HTTP/1.1" 304 -
+[radar] "GET /styles.css HTTP/1.1" 200 -
+[radar] "GET /app.js HTTP/1.1" 200 -
+[radar] "GET /api/me HTTP/1.1" 200 -
+[radar] "GET /api/dashboard HTTP/1.1" 200 -
+[radar] "GET /api/work/summary?days=7 HTTP/1.1" 200 -
+[radar] "GET /api/dashboard HTTP/1.1" 200 -
+[radar] "GET /api/work/summary?days=7 HTTP/1.1" 200 -
+[radar] "GET /api/dashboard HTTP/1.1" 200 -
+[radar] "GET /api/work/summary?days=7 HTTP/1.1" 200 -
+[radar] "GET /api/dashboard HTTP/1.1" 200 -
+[radar] "GET /api/work/summary?days=7 HTTP/1.1" 200 -
+[radar] "GET /api/dashboard HTTP/1.1" 200 -
+[radar] "GET /api/work/summary?days=7 HTTP/1.1" 200 -
+[radar] "GET /api/dashboard HTTP/1.1" 200 -
+[radar] "GET /api/work/summary?days=7 HTTP/1.1" 200 -
+[radar] "GET /api/dashboard HTTP/1.1" 200 -
+[radar] "GET /api/work/summary?days=7 HTTP/1.1" 200 -
+[radar] "GET /? HTTP/1.1" 304 -
+[radar] "GET /styles.css HTTP/1.1" 304 -
+[radar] "GET /app.js HTTP/1.1" 304 -
+[radar] "GET /api/me HTTP/1.1" 200 -
+[radar] "GET /api/dashboard HTTP/1.1" 200 -
+[radar] "GET /api/dashboard HTTP/1.1" 200 -
+[radar] "GET /api/work/summary?days=30 HTTP/1.1" 200 -
+[Lark] [2026-08-30 19:55:21,570] [ERROR] receive message loop exit, err: received 3003 (registered) ping_timeout; then sent 3003 (registered) ping_timeout [conn_id=7679776247711058896]
+[Lark] [2026-08-30 19:55:21,571] [INFO] disconnected to wss://msg-frontier.feishu.cn/ws/v2?fpid=493&aid=552564&device_id=7679776247711058896&access_key=046503f43a52982c84eba8cb51b53392&service_id=33554678&ticket=2df915be-d883-4557-a594-95ce8cfce05f [conn_id=7679776247711058896]
+[Lark] [2026-08-30 19:55:37,877] [INFO] trying to reconnect for the 1st time
+[Lark] [2026-08-30 19:55:38,420] [INFO] connected to wss://msg-frontier.feishu.cn/ws/v2?fpid=493&aid=552564&device_id=7679792078033882071&access_key=a93c0cfd4071e5b77dc28eacbf4bd6dd&service_id=33554678&ticket=da28c9a4-4a0a-49e8-9cd7-a13db107d097 [conn_id=7679792078033882071]
+[feishu-inbox] ws ok=True skipped=None user=bob intent=general_chat
+[observe] 定时采集
+[Lark] [2026-08-30 21:58:38,415] [ERROR] receive message loop exit, err: received 3003 (registered) ping_timeout; then sent 3003 (registered) ping_timeout [conn_id=7679792078033882071]
+[Lark] [2026-08-30 21:58:38,418] [INFO] disconnected to wss://msg-frontier.feishu.cn/ws/v2?fpid=493&aid=552564&device_id=7679792078033882071&access_key=a93c0cfd4071e5b77dc28eacbf4bd6dd&service_id=33554678&ticket=da28c9a4-4a0a-49e8-9cd7-a13db107d097 [conn_id=7679792078033882071]
+[ingest] hf-blog failed: <urlopen error timed out>
+[Lark] [2026-08-30 21:58:57,795] [INFO] trying to reconnect for the 1st time
+[Lark] [2026-08-30 21:58:58,988] [INFO] connected to wss://msg-frontier.feishu.cn/ws/v2?fpid=493&aid=552564&device_id=7679823812716874943&access_key=056f00c803ff5a462dc521f1769bcf8d&service_id=33554678&ticket=ee2d7bfd-86b6-489a-800e-750e5cf0df2b [conn_id=7679823812716874943]
+[llm] request failed: The read operation timed out
+[llm] request failed: The read operation timed out
+[llm] request failed: The read operation timed out
+[Lark] [2026-08-30 22:19:08,400] [ERROR] receive message loop exit, err: received 3003 (registered) ping_timeout; then sent 3003 (registered) ping_timeout [conn_id=7679823812716874943]
+[Lark] [2026-08-30 22:19:08,401] [INFO] disconnected to wss://msg-frontier.feishu.cn/ws/v2?fpid=493&aid=552564&device_id=7679823812716874943&access_key=056f00c803ff5a462dc521f1769bcf8d&service_id=33554678&ticket=ee2d7bfd-86b6-489a-800e-750e5cf0df2b [conn_id=7679823812716874943]
+[Lark] [2026-08-30 22:19:15,657] [INFO] trying to reconnect for the 1st time
+[Lark] [2026-08-30 22:19:16,214] [INFO] connected to wss://msg-frontier.feishu.cn/ws/v2?fpid=493&aid=552564&device_id=7679829073111616731&access_key=894bd3cc80990fb89284c3557c372234&service_id=33554678&ticket=b3bf0ae0-3516-4b79-ad8b-7b7ef8957abf [conn_id=7679829073111616731]

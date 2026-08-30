@@ -296,7 +296,11 @@ class RadarService:
         }
 
     def refresh(self, auto_push: bool = True, user_id: str | None = None) -> dict:
-        raw = ingest.fetch_all(self.sources)
+        # 采集全局源 + 各用户的自定义源
+        all_specs = list(self.sources)
+        for uid in self.identity.active_ids():
+            all_specs.extend(self._scope(uid).workspace.user_sources())
+        raw = ingest.fetch_all(all_specs)
         understood = intelligence.understand_all(raw)
         if understood:
             self.pool.merge(understood)
@@ -444,6 +448,26 @@ class RadarService:
     def save_goals(self, items: list[dict], user_id: str | None = None) -> list[dict]:
         return self._scope(user_id).workspace.save_goals(items)
 
+    def add_goal(self, payload: dict, user_id: str | None = None) -> dict:
+        title = str(payload.get("title") or "").strip()[:120]
+        kind = str(payload.get("kind") or "today").strip()
+        priority = str(payload.get("priority") or "medium").strip().lower()
+        if not title:
+            raise ValueError("title required")
+        return self._scope(user_id).workspace.add_goal(title, kind=kind, priority=priority)
+
+    def update_goal(self, goal_id: str, patch: dict, user_id: str | None = None) -> dict:
+        row = self._scope(user_id).workspace.update_goal(goal_id, patch or {})
+        if not row:
+            raise KeyError(goal_id)
+        return row
+
+    def delete_goal(self, goal_id: str, user_id: str | None = None) -> dict:
+        ok = self._scope(user_id).workspace.delete_goal(goal_id)
+        if not ok:
+            raise KeyError(goal_id)
+        return {"ok": True, "id": goal_id}
+
     def work_snapshot(self, user_id: str | None = None) -> dict:
         return self._scope(user_id).work.snapshot()
 
@@ -457,6 +481,8 @@ class RadarService:
         data = dict(payload or {})
         data.pop("user_id", None)
         row = self._scope(uid).work.create_task(data)
+        # 自动关联匹配的 Goal
+        row = self._auto_assign_goal(uid, row) or row
         schedule_task_reminders(self, uid, row)
         return row
 
@@ -467,8 +493,101 @@ class RadarService:
         data = dict(payload or {})
         data.pop("user_id", None)
         row = self._scope(uid).work.update_task(task_id, data)
+        # 更新完成状态时同步关联 Goal 的 linked/progress
+        if "status" in data and str(data["status"]).lower() == "done":
+            self._update_goal_linked(uid, row.get("goal_id") or "")
         on_task_updated(self, uid, row, data)
         return row
+
+    @staticmethod
+    def _match_keywords(title: str, goals: list[dict]) -> list[dict]:
+        import re
+
+        needle = (title or "").strip().lower()
+        if not needle:
+            return []
+
+        def grams(text: str) -> set[str]:
+            return {text[i:i + 2] for i in range(len(text) - 1)} if len(text) >= 2 else {text}
+
+        def ascii_words(text: str) -> set[str]:
+            return set(re.findall(r"[a-z0-9]{2,}", text))
+
+        needle_grams = grams(needle)
+        needle_words = ascii_words(needle)
+        scored = []
+        for g in goals:
+            goal_text = str(g.get("title") or "").strip().lower()
+            if not goal_text:
+                continue
+            goal_grams = grams(goal_text)
+            goal_words = ascii_words(goal_text)
+            # 直接包含给最高分
+            if needle in goal_text or goal_text in needle:
+                scored.append((1.0, g))
+                continue
+            # ASCII 词级命中率（英文关键词如 VLM/Mem0）
+            word_score = 0.0
+            if needle_words:
+                word_score = len(needle_words & goal_words) / len(needle_words)
+            # CJK bigram 覆盖率（相对任务标题）
+            gram_score = len(needle_grams & goal_grams) / max(len(needle_grams), 1)
+            overlap = max(word_score, gram_score)
+            if overlap >= 0.3:
+                scored.append((overlap, g))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [g for _, g in scored[:1]]
+
+    def _auto_assign_goal(self, user_id: str, task: dict) -> dict | None:
+        """创建任务时自动匹配最相关的 Goal，更新 goal 关联计数并回写 task.goal_id，返回更新后的 task"""
+        if task.get("goal_id"):
+            return None  # 已指定则不覆盖
+        scope = self._scope(user_id)
+        goals = scope.workspace.goals()
+        open_goals = [g for g in goals if not g.get("done")]
+        if not open_goals:
+            return None
+        matches = self._match_keywords(task.get("title") or "", open_goals)
+        if not matches:
+            return None
+        goal = matches[0]
+        updated = dict(task)
+        try:
+            # goal → task 关联：更新 goal 的 linked 计数
+            items = scope.workspace.goals()
+            for index, item in enumerate(items):
+                if item.get("id") != goal["id"]:
+                    continue
+                merged = dict(item)
+                merged["linked"] = (merged.get("linked") or 0) + 1
+                items[index] = merged
+                scope.workspace.save_goals(items)
+                break
+            # task → goal 回写
+            updated = scope.work.update_task(task["id"], {"goal_id": goal["id"]})
+        except Exception:
+            pass  # 静默失败
+        return updated
+
+    def _update_goal_linked(self, user_id: str, goal_id: str) -> None:
+        """任务完成后，目标 linked +1，progress 按比例提升"""
+        if not goal_id:
+            return
+        scope = self._scope(user_id)
+        try:
+            items = scope.workspace.goals()
+            for index, item in enumerate(items):
+                if item.get("id") != goal_id:
+                    continue
+                merged = dict(item)
+                merged["linked"] = (merged.get("linked") or 0) + 1
+                progress = merged.get("progress") or 0
+                merged["progress"] = min(100, progress + 5)
+                items[index] = merged
+                scope.workspace.save_goals(items)
+                break
+        except Exception:
+            pass  # 静默失败
 
     def list_reminders(self, user_id: str | None = None, include_sent: bool = True) -> list[dict]:
         return self._scope(user_id).work.reminders(include_sent=include_sent)
@@ -642,6 +761,128 @@ class RadarService:
 
     def save_products(self, items: list[dict], user_id: str | None = None) -> list[dict]:
         return self._scope(user_id).workspace.save_products(items)
+
+    def user_sources(self, user_id: str | None = None) -> list[dict]:
+        return self._scope(user_id).workspace.user_sources()
+
+    def add_user_source(self, payload: dict, user_id: str | None = None) -> dict:
+        return self._scope(user_id).workspace.add_user_source(payload or {})
+
+    def update_user_source(self, source_id: str, patch: dict, user_id: str | None = None) -> dict:
+        row = self._scope(user_id).workspace.update_user_source(source_id, patch or {})
+        if not row:
+            raise KeyError(source_id)
+        return row
+
+    def delete_user_source(self, source_id: str, user_id: str | None = None) -> dict:
+        ok = self._scope(user_id).workspace.delete_user_source(source_id)
+        if not ok:
+            raise KeyError(source_id)
+        return {"ok": True, "id": source_id}
+
+    def merged_sources(self, user_id: str | None = None) -> list[dict]:
+        """全局源 + 当前用户自定义源（采集时使用）。"""
+        scope = self._scope(user_id)
+        rows = list(self.sources)
+        for spec in scope.workspace.user_sources():
+            merged = dict(spec)
+            if merged.get("kind") == "github_releases" and merged.get("repo"):
+                merged.setdefault("url", "")
+            rows.append(merged)
+        return rows
+
+    def follows_overview(self, user_id: str | None = None) -> dict:
+        """主题/产品/信息源 + 各自最近动态摘要（来自采集池真实数据）。"""
+        from datetime import timedelta
+
+        scope = self._scope(user_id)
+        ctx = scope.user_memory.context()
+        interests = ctx.get("interests") or []
+        products = scope.workspace.products()
+        pool = self.pool.items()
+        now = datetime.now(timezone.utc)
+
+        def _match(keyword: str) -> list[dict]:
+            needle = (keyword or "").strip().lower()
+            if not needle:
+                return []
+            hits = []
+            for row in pool:
+                blob = " ".join(
+                    [
+                        str(row.get("title") or ""),
+                        str(row.get("summary") or row.get("summary_zh") or ""),
+                        " ".join(row.get("tags") or []),
+                        " ".join(row.get("keywords") or []),
+                        str(row.get("source_name") or ""),
+                    ]
+                ).lower()
+                if needle in blob:
+                    hits.append(row)
+            hits.sort(key=lambda row: str(row.get("published_at") or ""), reverse=True)
+            return hits
+
+        def _brief(keyword: str) -> dict:
+            hits = _match(keyword)
+            if not hits:
+                return {"latest_title": "", "latest_at": "", "count": 0}
+            top = hits[0]
+            published = str(top.get("published_at") or "")
+            days = ""
+            if published:
+                try:
+                    delta = now - datetime.fromisoformat(published.replace("Z", "+00:00"))
+                    days = max(0, delta.days)
+                except ValueError:
+                    days = ""
+            return {
+                "latest_title": str(top.get("title") or "")[:80],
+                "latest_at": published[:10],
+                "latest_days_ago": days,
+                "count": len(hits),
+            }
+
+        interest_rows = [
+            {**row, "brief": _brief(str(row.get("topic") or ""))}
+            for row in interests
+        ]
+        product_rows = [
+            {**row, "brief": _brief(str(row.get("name") or ""))}
+            for row in products
+        ]
+        source_rows = []
+        for spec in self.merged_sources(scope.user_id):
+            name = str(spec.get("name") or "")
+            hits = [row for row in pool if str(row.get("source_name") or "") == name]
+            hits.sort(key=lambda row: str(row.get("published_at") or ""), reverse=True)
+            source_rows.append(
+                {
+                    "id": spec.get("id") or "",
+                    "name": name,
+                    "kind": spec.get("kind") or "",
+                    "type": spec.get("type") or "",
+                    "search": spec.get("search") or "",
+                    "repo": spec.get("repo") or "",
+                    "url": spec.get("url") or "",
+                    "custom": str(spec.get("id") or "").startswith("user-"),
+                    "count": len(hits),
+                    "latest_title": str(hits[0].get("title") or "")[:80] if hits else "",
+                    "latest_at": str(hits[0].get("published_at") or "")[:10] if hits else "",
+                }
+            )
+        focus = sorted(
+            [row for row in interest_rows if row["brief"]["count"]],
+            key=lambda row: -row["brief"]["count"],
+        )
+        return {
+            "interests": interest_rows,
+            "products": product_rows,
+            "sources": source_rows,
+            "focus": [
+                {"topic": row["topic"], "weight": row.get("weight"), "brief": row["brief"]}
+                for row in focus[:3]
+            ],
+        }
 
     def save_push_settings(self, payload: dict, user_id: str | None = None) -> dict:
         return self._scope(user_id).workspace.save_push_settings(payload)

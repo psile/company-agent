@@ -180,6 +180,9 @@ def make_handler(service: RadarService):
     add("GET", "/api/profile", "user", lambda h, uid, *_: h._json(200, service.for_user(uid).memory.profile()))
     add("GET", "/api/memory/profile", "user", lambda h, uid, *_: h._json(200, service.for_user(uid).user_memory.profile()))
     add("GET", "/api/goals", "user", lambda h, uid, *_: h._json(200, {"items": service.for_user(uid).workspace.goals()}))
+    add("POST", "/api/goals", "user", lambda h, uid, _p, _q, body: h._json(200, service.add_goal(body or {}, user_id=uid)))
+    add("PUT", "/api/goals/{goal_id}", "user", lambda h, uid, params, _q, body: h._json(200, service.update_goal(params["goal_id"], body or {}, user_id=uid)))
+    add("DELETE", "/api/goals/{goal_id}", "user", lambda h, uid, params, *_: h._json(200, service.delete_goal(params["goal_id"], user_id=uid)))
     add(
         "GET",
         "/api/work/tasks",
@@ -237,6 +240,11 @@ def make_handler(service: RadarService):
     add("PUT", "/api/work/tasks/{task_id}", "user", lambda h, uid, params, _q, body: h._json(200, service.update_task(params["task_id"], body or {}, user_id=uid)))
     add("PUT", "/api/work/reports/{report_id}", "user", lambda h, uid, params, _q, body: h._json(200, service.update_report(params["report_id"], body or {}, user_id=uid)))
     add("PUT", "/api/products", "user", lambda h, uid, _p, _q, body: h._json(200, {"items": service.save_products(body.get("items") or [], user_id=uid)}))
+    add("GET", "/api/user-sources", "user", lambda h, uid, *_: h._json(200, {"items": service.user_sources(uid)}))
+    add("GET", "/api/follows/overview", "user", lambda h, uid, *_: h._json(200, service.follows_overview(uid)))
+    add("POST", "/api/user-sources", "user", lambda h, uid, _p, _q, body: h._json(200, service.add_user_source(body or {}, user_id=uid)))
+    add("PUT", "/api/user-sources/{source_id}", "user", lambda h, uid, params, _q, body: h._json(200, service.update_user_source(params["source_id"], body or {}, user_id=uid)))
+    add("DELETE", "/api/user-sources/{source_id}", "user", lambda h, uid, params, *_: h._json(200, service.delete_user_source(params["source_id"], user_id=uid)))
     add("PUT", "/api/push-settings", "user", lambda h, uid, _p, _q, body: h._json(200, service.save_push_settings(body or {}, user_id=uid)))
     add("PUT", "/api/account/feishu", "user", lambda h, uid, _p, _q, body: h._json(200, service.save_feishu_settings(body or {}, user_id=uid)))
     add("PUT", "/api/settings/llm", "user", lambda h, uid, _p, _q, body: h._json(200, service.save_llm_settings(body or {})))

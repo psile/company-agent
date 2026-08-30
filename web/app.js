@@ -68,6 +68,8 @@ const state = {
   reportType: "daily",
   workSummary: null,
   summaryRange: "7",
+  followsOverview: null,
+  editingProduct: null,
   pendingChatExample: "",
   workDate: localDateKey(new Date()),
   workView: "day",
@@ -570,12 +572,12 @@ function followForm() {
   }
   if (state.followKind === "source") {
     return `
-      <p class="tiny">指定网站、RSS 或官方 Blog，Agent 会在后台持续采集。</p>
-      <div class="field"><label>信息源名称</label><input id="sourceName" placeholder="OpenAI Blog" /></div>
-      <div class="field"><label>链接或 RSS</label><input id="sourceUrl" placeholder="https://" /></div>
-      <div class="field"><label>类型</label><select id="sourceType"><option value="blog">官方 Blog</option><option value="paper">学术论文</option><option value="news">行业新闻</option><option value="release">代码仓库</option></select></div>
-      <button class="btn" id="addSourceBtn" type="button">加入观察源</button>
-      <p class="hint">当前 Demo 的采集清单仍以 sources.json 为准，这里会先记入关注，后续接入自定义源。</p>`;
+    <p class="tiny">指定 RSS / Blog / GitHub 仓库，Agent 会在后台持续采集，可随时在列表中删除。</p>
+    <div class="field"><label>信息源名称</label><input id="sourceName" placeholder="OpenAI Blog" /></div>
+    <div class="field"><label>链接（RSS 地址或 GitHub 仓库）</label><input id="sourceUrl" placeholder="https://" /></div>
+    <div class="field"><label>类型</label><select id="sourceType"><option value="blog">官方 Blog / RSS</option><option value="release">代码仓库 Releases</option><option value="news">行业新闻</option></select></div>
+    <button class="btn" id="addSourceBtn" type="button">加入观察源</button>
+    <p class="hint">添加后点首页「刷新源」立即生效；删除请到信息源列表。</p>`;
   }
   if (state.followKind === "goal") {
     return `
@@ -598,17 +600,28 @@ function followForm() {
     <p class="hint" style="margin-top:12px">Agent 会按你的偏好精确过滤信息，而不是把整个信息流都推给你。</p>`;
 }
 
+function briefLine(brief) {
+  if (!brief || !brief.count) return "";
+  const when = brief.latest_days_ago !== undefined && brief.latest_days_ago !== ""
+    ? (brief.latest_days_ago === 0 ? "今天" : brief.latest_days_ago === 1 ? "昨天" : `${brief.latest_days_ago} 天前`)
+    : (brief.latest_at || "");
+  return `<div class="follow-brief"><b>最近</b>${escapeHtml(brief.latest_title || "")}<span class="tiny">${escapeHtml(when)} · 共 ${brief.count} 条</span></div>`;
+}
+
 function pageFollows() {
   const dash = state.dash;
-  const interests = dash.interests || [];
-  const products = dash.products || [];
-  const sources = dash.sources || [];
+  const overview = state.followsOverview || {};
+  const interests = (overview.interests || dash.interests || []);
+  const products = (overview.products || dash.products || []);
+  const sources = (overview.sources || dash.sources || []);
+  const focus = overview.focus || [];
   const typeMap = { paper: "学术论文", release: "代码发布", blog: "官方 Blog", news: "行业新闻", arxiv: "学术论文" };
+  const editing = state.editingProduct;
   return `
     <div class="page-head">
       <div>
         <h1>我的关注</h1>
-        <p>告诉 Agent 你希望持续关注什么，它会替你观察世界。</p>
+        <p>主题、产品和信息源都可以在这里直接编辑，每张卡片显示最近更新，一眼看到进展。</p>
       </div>
       <button class="btn" data-scroll="addFollow" type="button">+ 新增关注</button>
     </div>
@@ -616,22 +629,63 @@ function pageFollows() {
       <div class="stack">
         <section class="card">
           <h2>主题关注</h2>
-          <div class="grid-cards">${interests.map((row) => `<div class="mini"><span class="tag">主题</span><b>${escapeHtml(row.topic)}</b>${dots(row.weight)}<div class="tiny">权重 ${Number(row.weight||0).toFixed(2)}</div></div>`).join("")}</div>
+          <div class="grid-cards">${interests.length ? interests.map((row) => `<div class="mini">
+            <span class="tag">主题</span><b>${escapeHtml(row.topic)}</b>${dots(row.weight)}
+            <div class="tiny">权重 ${Number(row.weight||0).toFixed(2)}</div>
+            ${briefLine(row.brief)}
+            <div class="row-actions">
+              <button class="btn-ghost" data-interest-weight="${escapeHtml(row.topic)}" data-dir="up" type="button">调高权重</button>
+              <button class="btn-ghost" data-interest-weight="${escapeHtml(row.topic)}" data-dir="down" type="button">调低</button>
+              <button class="btn-ghost" data-interest-delete="${escapeHtml(row.topic)}" type="button">删除</button>
+            </div>
+          </div>`).join("") : '<p class="tiny">还没有主题关注。右侧添加，或在对话里说「重点关注 Agent Memory」。</p>'}</div>
         </section>
         <section class="card">
           <h2>产品 / 项目关注</h2>
-          <div class="grid-cards">${products.map((row) => `<div class="mini"><b>${escapeHtml(row.name)}</b><div class="tiny">${escapeHtml(row.status || "持续跟踪")}</div><span class="tag green">${row.running === false ? "暂停" : "运行中"}</span></div>`).join("")}</div>
+          <div class="grid-cards">${products.length ? products.map((row) => {
+            const isEditing = editing && editing.id === row.id;
+            return `<div class="mini">
+              ${isEditing ? `
+                <div class="field"><label>名称</label><input id="editProductName" value="${escapeHtml(row.name)}" /></div>
+                <div class="field"><label>跟踪方式</label><select id="editProductStatus">
+                  ${["深度关注","持续跟踪","暂停观察"].map((s) => `<option${s === (row.status || "持续跟踪") ? " selected" : ""}>${s}</option>`).join("")}
+                </select></div>
+                <div class="field"><label>状态</label><select id="editProductRunning">
+                  <option value="on"${row.running !== false ? " selected" : ""}>运行中</option>
+                  <option value="off"${row.running === false ? " selected" : ""}>暂停</option>
+                </select></div>
+                <div class="row-actions">
+                  <button class="btn" data-product-save="${escapeHtml(row.id)}" type="button">保存</button>
+                  <button class="btn-ghost" data-product-cancel="1" type="button">取消</button>
+                </div>` : `
+                <b>${escapeHtml(row.name)}</b>
+                <div class="tiny">${escapeHtml(row.status || "持续跟踪")}</div>
+                <span class="tag ${row.running === false ? "" : "green"}">${row.running === false ? "暂停" : "运行中"}</span>
+                ${briefLine(row.brief)}
+                <div class="row-actions">
+                  <button class="btn-ghost" data-product-edit="${escapeHtml(row.id)}" type="button">编辑</button>
+                  <button class="btn-ghost" data-product-toggle="${escapeHtml(row.id)}" data-running="${row.running === false ? "on" : "off"}" type="button">${row.running === false ? "恢复运行" : "暂停"}</button>
+                </div>`}
+            </div>`;
+          }).join("") : '<p class="tiny">还没有产品关注。右侧添加，例如 Mem0、vLLM。</p>'}</div>
         </section>
         <section class="card">
           <h2>信息源关注</h2>
           <table class="table">
-            <thead><tr><th>信息源</th><th>类型</th><th>关注内容</th><th>频率</th><th>状态</th><th>操作</th></tr></thead>
-            <tbody>${sources.map((src) => `<tr><td>${escapeHtml(src.name)}</td><td>${escapeHtml(typeMap[src.type] || src.type || src.kind)}</td><td>${escapeHtml(src.search || src.repo || src.url || "—")}</td><td>${src.kind==="arxiv"?"实时":"每日"}</td><td><span class="tag green">运行中</span></td><td class="tiny">暂停 · 编辑 · 删除</td></tr>`).join("")}</tbody>
+            <thead><tr><th>信息源</th><th>类型</th><th>关注内容</th><th>最近采集</th><th>操作</th></tr></thead>
+            <tbody>${sources.length ? sources.map((src) => `<tr>
+              <td>${escapeHtml(src.name)}${src.custom ? ' <span class="tag">自定义</span>' : ""}</td>
+              <td>${escapeHtml(typeMap[src.type] || src.type || src.kind)}</td>
+              <td class="tiny">${escapeHtml(src.search || src.repo || src.url || "—")}</td>
+              <td class="tiny">${src.count ? `${escapeHtml(src.latest_title || "")}<br>${escapeHtml(src.latest_at || "")} · ${src.count} 条` : "暂无采集记录"}</td>
+              <td class="tiny">${src.custom ? `<button class="btn-ghost" data-source-delete="${escapeHtml(src.id)}" type="button">删除</button>` : "内置源"}</td>
+            </tr>`).join("") : '<tr><td colspan="5" class="tiny">还没有信息源。</td></tr>'}</tbody>
           </table>
+          <p class="hint">自定义信息源会在下次「刷新源」时参与采集；内置源由系统维护。</p>
         </section>
         <section class="card">
           <h2>近期重点关注</h2>
-          <p>由当前目标 / 项目自动生成：本周重点关注 ${(interests.slice(0,3).map((r)=>r.topic).join("、")) || "你的核心主题"}。</p>
+          ${focus.length ? `<div class="stack">${focus.map((row) => `<p><b>${escapeHtml(row.topic)}</b>　${escapeHtml(row.brief.latest_title || "暂无新内容")}<span class="tiny">　${row.brief.count} 条相关</span></p>`).join("")}</div>` : "<p class='tiny'>采集到与你关注主题相关的内容后，这里会显示每个主题的最新进展。</p>"}
         </section>
       </div>
       <aside class="card" id="addFollow">
@@ -1015,6 +1069,7 @@ function projectEditor(projects) {
 
 function pageGoals() {
   const goals = state.dash.goals || [];
+  const editing = state.editingGoalId || null;
   const groups = [
     ["today", "今日目标", "把今天的任务变成推荐上下文"],
     ["week", "短期目标", "本周焦点"],
@@ -1026,23 +1081,53 @@ function pageGoals() {
     <div class="page-head">
       <div>
         <h1>目标管理</h1>
-        <p>将今日、短期和长期目标纳入 Agent 决策，让推荐真正服务当前任务。</p>
+        <p>编辑、新增、删除目标，让 Agent 的推荐真正围绕你的真实工作展开。</p>
       </div>
     </div>
     <div class="layout">
       <div class="stack">${groups.map(([kind, title]) => {
         const rows = goals.filter((g) => g.kind === kind);
         const done = rows.filter((g) => g.done).length;
-        return `<section class="card"><div class="page-head" style="margin:0 0 10px"><h2 style="margin:0">${title}</h2><span class="tiny">${done}/${rows.length || 0}</span></div>${
-          rows.map((g) => `<div class="item"><div class="item-top"><b>${escapeHtml(g.title)}</b><span class="tag ${g.priority==="high"?"orange":"gray"}">${pri[g.priority]||"中优先级"}</span></div><div class="barline"><span style="width:${g.progress||0}%"></span></div><div class="tiny">进度 ${g.progress||0}% · 已关联推荐 ${g.linked||0} 条 · 对推荐影响：${g.priority==="high"?"高相关":"中相关"}</div></div>`).join("") || "<p class='tiny'>还没有这类目标。</p>"
-        }</section>`;
+        return `<section class="card">
+          <div class="page-head" style="margin:0 0 10px">
+            <h2 style="margin:0">${title}</h2>
+            <span class="tiny">${done}/${rows.length || 0}</span>
+            ${!editing ? `<button class="btn-ghost" data-add-goal="${escapeHtml(kind)}" type="button">+ 新增</button>` : ""}
+          </div>
+          ${rows.map((g) => {
+            const isEditing = editing === g.id;
+            if (isEditing) {
+              return `<div class="item edit-mode" data-edit-goal-id="${escapeHtml(g.id)}">
+                <div class="field"><label>标题</label><input id="editGoalTitle-${g.id}" value="${escapeHtml(g.title)}" /></div>
+                <div class="field"><label>类型</label><select id="editGoalKind-${g.id}">
+                  ${["today","week","quarter","open"].map((k) => `<option${k === g.kind ? " selected" : ""}>${{"today":"今日","week":"短期","quarter":"长期","open":"不定期"}[k]}</option>`).join("")}
+                </select></div>
+                <div class="field"><label>优先级</label><select id="editGoalPriority-${g.id}">
+                  ${Object.keys(pri).map((p) => `<option${p === g.priority ? " selected" : ""}>${pri[p]}</option>`).join("")}
+                </select></div>
+                <div class="row-actions">
+                  <button class="btn" data-save-edit-goal="${escapeHtml(g.id)}" type="button">保存</button>
+                  <button class="btn-ghost" data-cancel-edit-goal="1" type="button">取消</button>
+                </div>
+              </div>`;
+            }
+            return `<div class="item" data-goal-id="${escapeHtml(g.id)}">
+              <div class="item-top">
+                <b>${escapeHtml(g.title)}</b>
+                <span class="tag ${g.priority==="high"?"orange":"gray"}">${pri[g.priority]||"中优先级"}</span>
+              </div>
+              <div class="barline"><span style="width:${g.progress||0}%"></span></div>
+              <div class="goal-meta">
+                <span class="tiny">进度 ${g.progress||0}% · 已关联 ${g.linked||0} 条推荐</span>
+                <button class="btn-ghost" data-delete-goal="${escapeHtml(g.id)}" type="button">删除</button>
+              </div>
+            </div>`;
+          }).join("") || "<p class='tiny'>还没有这类目标。点「+ 新增」添加一个。</p>"}
+        </section>`;
       }).join("")}
-        <section class="card">
-          <h2>新增目标</h2>
-          <div class="field"><label>名称</label><input id="goalTitle" placeholder="本周完成个性化推荐 Demo" /></div>
-          <div class="field"><label>类型</label><select id="goalKind"><option value="today">今日</option><option value="week" selected>短期</option><option value="quarter">长期</option><option value="open">不定期</option></select></div>
-          <button class="btn" id="addGoalBtn" type="button">加入 Agent 决策</button>
-        </section>
+        <details class="card" ${!editing ? "open" : ""}><summary>编辑模式提示</summary>
+          <p class="hint">在目标卡片内直接修改标题/类型/优先级；点击任意目标进入编辑态；完成后点「保存」。</p>
+        </details>
       </div>
       <aside class="stack">
         <section class="card">
@@ -1058,7 +1143,7 @@ function pageGoals() {
         </section>
         <section class="card">
           <h3>更多能力</h3>
-          <div class="coming"><span>待办关联</span><span class="tag">即将推出</span></div>
+          <div class="coming"><span>Task 自动关联</span><span class="tag" style="background:var(--ok-soft);color:var(--ok)">已上线</span></div>
           <div class="coming"><span>日报生成</span><span class="tag">即将推出</span></div>
           <div class="coming"><span>习惯打卡</span><span class="tag">即将推出</span></div>
         </section>
@@ -1559,6 +1644,11 @@ async function load() {
       state.workSummary = await api(`/api/work/summary?days=${encodeURIComponent(state.summaryRange || "7")}`);
     } catch { state.workSummary = null; }
   }
+  if (state.route === "/follows") {
+    try {
+      state.followsOverview = await api("/api/follows/overview");
+    } catch { state.followsOverview = null; }
+  }
   hideAuth();
   render();
 }
@@ -1624,7 +1714,7 @@ async function refreshFeeds(btn) {
 }
 
 document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-act],[data-open],[data-rectab],[data-filter],[data-cat],[data-card],[data-topic],[data-example],[data-toggle],[data-move],[data-followkind],[data-chat-session],[data-chat-example],[data-task-act],[data-task-edit],[data-task-new],[data-work-date],[data-work-shift],[data-work-view],[data-project-select],[data-project-accept],[data-project-milestone],[data-report-tab],[data-skill],[data-llm-preset],[data-copy-report],[data-export-report],[data-regen-report],[data-jump-day],#newChatBtn,#saveConversationProfileBtn,#refreshBtn,#refreshBtn2,#followBtn,#addGoalBtn,#savePrefBtn,#savePushBtn,#pushNowBtn,#briefBtn,#noticeBtn,#saveProfileBtn,#exportBtn,#addProductBtn,#addSourceBtn,#addFollowGoalBtn,#logoutBtn,#savePassBtn,#saveFeishuBtn,#llmEnabledBtn,#saveLlmBtn,#testLlmBtn,#generateReportBtn,#copyReportBtn,#exportReportBtn,#saveReportBtn,#addWorkTaskBtn,#workTodayBtn,#taskEditorClose,#taskEditorCancel,#newProjectBtn,#editProjectBtn,#addProjectTaskBtn,#addProjectTaskBtn2,#projectEditorClose,#projectEditorCancel");
+  const t = event.target.closest("[data-act],[data-open],[data-rectab],[data-filter],[data-cat],[data-card],[data-topic],[data-example],[data-toggle],[data-move],[data-followkind],[data-chat-session],[data-chat-example],[data-task-act],[data-task-edit],[data-task-new],[data-work-date],[data-work-shift],[data-work-view],[data-project-select],[data-project-accept],[data-project-milestone],[data-report-tab],[data-skill],[data-llm-preset],[data-copy-report],[data-export-report],[data-regen-report],[data-jump-day],[data-interest-weight],[data-interest-delete],[data-product-edit],[data-product-cancel],[data-product-save],[data-product-toggle],[data-source-delete],[data-add-goal],[data-save-edit-goal],[data-cancel-edit-goal],[data-delete-goal],#newChatBtn,#saveConversationProfileBtn,#refreshBtn,#refreshBtn2,#followBtn,#addGoalBtn,#savePrefBtn,#savePushBtn,#pushNowBtn,#briefBtn,#noticeBtn,#saveProfileBtn,#exportBtn,#addProductBtn,#addSourceBtn,#addFollowGoalBtn,#logoutBtn,#savePassBtn,#saveFeishuBtn,#llmEnabledBtn,#saveLlmBtn,#testLlmBtn,#generateReportBtn,#copyReportBtn,#exportReportBtn,#saveReportBtn,#addWorkTaskBtn,#workTodayBtn,#taskEditorClose,#taskEditorCancel,#newProjectBtn,#editProjectBtn,#addProjectTaskBtn,#addProjectTaskBtn2,#projectEditorClose,#projectEditorCancel");
   if (!t) return;
   if (t.dataset.chatSession) {
     state.activeSessionId = t.dataset.chatSession;
@@ -1698,6 +1788,61 @@ document.addEventListener("click", async (event) => {
     const target = document.getElementById(`day-${t.dataset.jumpDay}`);
     if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
     return;
+  }
+  if (t.dataset.interestWeight) {
+    const topic = t.dataset.interestWeight;
+    const interests = state.dash.interests || [];
+    const row = interests.find((r) => r.topic === topic);
+    if (!row) return toast("未找到该主题");
+    const delta = t.dataset.dir === "up" ? 0.08 : -0.08;
+    const weight = Math.max(0.05, Math.min(0.99, Number(row.weight || 0.5) + delta));
+    const items = interests.map((r) => (r.topic === topic ? { ...r, weight: Number(weight.toFixed(2)) } : r));
+    await api("/api/interests", { method: "PUT", body: JSON.stringify({ items }) });
+    toast(`「${topic}」权重已调整为 ${weight.toFixed(2)}`);
+    return load();
+  }
+  if (t.dataset.interestDelete) {
+    const topic = t.dataset.interestDelete;
+    if (!confirm(`删除主题关注「${topic}」？`)) return;
+    const items = (state.dash.interests || []).filter((r) => r.topic !== topic);
+    await api("/api/interests", { method: "PUT", body: JSON.stringify({ items }) });
+    toast(`已删除「${topic}」`);
+    return load();
+  }
+  if (t.dataset.productEdit) {
+    const row = (state.dash.products || []).find((r) => r.id === t.dataset.productEdit);
+    state.editingProduct = row ? { ...row } : null;
+    return render();
+  }
+  if (t.dataset.productCancel) {
+    state.editingProduct = null;
+    return render();
+  }
+  if (t.dataset.productSave) {
+    const id = t.dataset.productSave;
+    const name = $("editProductName")?.value.trim();
+    const status = $("editProductStatus")?.value || "持续跟踪";
+    const running = ($("editProductRunning")?.value || "on") === "on";
+    if (!name) return toast("名称不能为空");
+    const items = (state.dash.products || []).map((r) => (r.id === id ? { ...r, name, status, running } : r));
+    await api("/api/products", { method: "PUT", body: JSON.stringify({ items }) });
+    state.editingProduct = null;
+    toast("产品关注已更新。");
+    return load();
+  }
+  if (t.dataset.productToggle) {
+    const id = t.dataset.productToggle;
+    const running = t.dataset.running === "on";
+    const items = (state.dash.products || []).map((r) => (r.id === id ? { ...r, running } : r));
+    await api("/api/products", { method: "PUT", body: JSON.stringify({ items }) });
+    toast(running ? "已恢复跟踪。" : "已暂停跟踪。");
+    return load();
+  }
+  if (t.dataset.sourceDelete) {
+    if (!confirm("删除这个自定义信息源？")) return;
+    await api(`/api/user-sources/${encodeURIComponent(t.dataset.sourceDelete)}`, { method: "DELETE" });
+    toast("信息源已删除。");
+    return load();
   }
   if (t.id === "generateReportBtn") {
     await api("/api/work/reports/generate", { method: "POST", body: JSON.stringify({ report_type: state.reportType || "daily" }) });
@@ -1895,12 +2040,37 @@ document.addEventListener("click", async (event) => {
     toast(out.note || "已创建关注");
     return load();
   }
-  if (t.id === "addGoalBtn") {
-    const title = $("goalTitle").value.trim();
-    if (!title) return toast("请填写目标名称");
-    const items = [...(state.dash.goals || []), { id: `g-${Date.now()}`, kind: $("goalKind").value, title, priority: "medium", progress: 0, linked: 0, done: false }];
-    await api("/api/goals", { method: "PUT", body: JSON.stringify({ items }) });
-    toast("目标已进入推荐上下文。");
+  if (t.dataset.addGoal) {
+    const kind = t.dataset.addGoal;
+    $("goalTitle")?.focus();
+    state.editingGoalId = null;
+    return render(); // 会重新渲染，但 addGoalBtn 已消失，改为直接调用 API
+    // 简化：直接调用 POST /api/goals
+    const title = `新目标 (${kind})`;
+    await api("/api/goals", { method: "POST", body: JSON.stringify({ title, kind }) });
+    toast("已添加目标。点击卡片可编辑。");
+    return load();
+  }
+  if (t.dataset.saveEditGoal) {
+    const id = t.dataset.saveEditGoal;
+    const title = $("editGoalTitle-" + id)?.value.trim();
+    const kind = $("editGoalKind-" + id)?.value || "today";
+    const priority = $("editGoalPriority-" + id)?.value || "medium";
+    if (!title) return toast("标题不能为空");
+    await api(`/api/goals/${id}`, { method: "PUT", body: JSON.stringify({ title, kind, priority }) });
+    state.editingGoalId = null;
+    toast("目标已更新。");
+    return load();
+  }
+  if (t.dataset.cancelEditGoal) {
+    state.editingGoalId = null;
+    return render();
+  }
+  if (t.dataset.deleteGoal) {
+    const id = t.dataset.deleteGoal;
+    if (!confirm("删除这个目标？关联的推荐上下文不会被清除。")) return;
+    await api(`/api/goals/${id}`, { method: "DELETE" });
+    toast("目标已删除。");
     return load();
   }
   if (t.id === "savePrefBtn") {
@@ -2034,9 +2204,24 @@ document.addEventListener("click", async (event) => {
   }
   if (t.id === "addSourceBtn") {
     const name = $("sourceName").value.trim();
+    const url = $("sourceUrl").value.trim();
     if (!name) return toast("请填写信息源名称");
-    await api("/api/follows", { method: "POST", body: JSON.stringify({ topic: name, text: `关注信息源 ${name} ${$("sourceUrl").value}` }) });
-    toast("已记下这个信息源。当前采集仍以订阅清单为准，自定义源会进入关注记忆。");
+    if (!url) return toast("请填写链接或 RSS");
+    const type = $("sourceType")?.value || "blog";
+    const kind = type === "release" ? "github_releases" : "rss";
+    try {
+      await api("/api/user-sources", { method: "POST", body: JSON.stringify({
+        name,
+        url: kind === "rss" ? url : "",
+        repo: type === "release" ? url.replace(/^https?:\/\/github\.com\//, "").replace(/\/releases$/, "") : "",
+        kind,
+        type,
+        max: 5,
+      }) });
+    } catch (err) {
+      return toast(err.message || "添加失败");
+    }
+    toast("信息源已加入，下次「刷新源」开始采集。");
     return load();
   }
   if (t.id === "addFollowGoalBtn") {
