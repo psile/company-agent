@@ -63,6 +63,16 @@ DEMO_USERS = [
         "work_notes": [
             {"content": "第一阶段优先聚焦主动感知 + 个性化推荐。", "tags": ["decision"], "project_id": "personal-agent"}
         ],
+        "work_events": [
+            {
+                "event_type": "task_created",
+                "title": "完善 Memory Demo",
+                "content": "补齐多用户 Memory 隔离与对话记忆演示。",
+                "project_id": "personal-agent",
+                "source_type": "seed",
+                "source_ref": "task-001",
+            },
+        ],
     },
     {
         "id": BOB,
@@ -108,6 +118,16 @@ DEMO_USERS = [
         ],
         "work_notes": [
             {"content": "智驾场景 VLM 方案对比仍缺闭环评测集。", "tags": ["research"], "project_id": "autonomous-driving"}
+        ],
+        "work_events": [
+            {
+                "event_type": "task_created",
+                "title": "整理 World Model 数据集",
+                "content": "汇总占用预测与闭环规划相关数据集，供本周调研使用。",
+                "project_id": "autonomous-driving",
+                "source_type": "seed",
+                "source_ref": "task-002",
+            },
         ],
     },
 ]
@@ -220,3 +240,45 @@ def bootstrap_new_user(root: Path, user_id: str, display_name: str) -> None:
             "products": [],
         },
     )
+
+
+def bootstrap_core_data(
+    tasks_service,
+    notes_service,
+    events_service,
+    user_root: Path,
+    user_id: str,
+) -> None:
+    """把种子 tasks/work_notes/work_events 写入核心服务存储（幂等：已有种子任务则跳过）。"""
+    spec = spec_by_id(user_id)
+    if not spec:
+        return
+    existing = tasks_service.list_tasks(user_id, source_type="seed")
+    if existing:
+        return
+    for draft in spec.get("tasks") or []:
+        tasks_service.create_task(
+            {
+                **draft,
+                "source_type": "seed",
+            },
+            user_id,
+        )
+    for draft in spec.get("work_notes") or []:
+        notes_service.create_note(
+            {
+                **draft,
+                "source_type": "seed",
+            },
+            user_id,
+        )
+    for draft in spec.get("work_events") or []:
+        events_service.record(
+            event_type=str(draft.get("event_type") or "note"),
+            user_id=user_id,
+            title=str(draft.get("title") or ""),
+            content=str(draft.get("content") or ""),
+            source_type="seed",
+            source_ref=str(draft.get("source_ref") or ""),
+            project_id=str(draft.get("project_id") or ""),
+        )

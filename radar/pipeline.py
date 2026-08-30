@@ -49,6 +49,13 @@ class RadarService:
 
         llm.set_data_dir(self.root)
         self.identity = IdentityService(self.root)
+        # 初始化核心服务层（数据存到 users/ 下）
+        from .core.services import TaskService, WorkEventService, WorkNoteService, ReminderService
+
+        self.tasks_service = TaskService(self.root / "users")
+        self.work_events_service = WorkEventService(self.root / "users")
+        self.work_notes_service = WorkNoteService(self.root / "users")
+        self.reminders_service = ReminderService(self.root / "users")
         self._ensure_demo()
         self.pool = ContentPool(self.root / "pool")
         self.observe_path = self.root / "pool" / "observe.json"
@@ -61,7 +68,7 @@ class RadarService:
         self.conversation = ConversationService(self, self.root)
 
     def _ensure_demo(self) -> None:
-        from .seeds import DEMO_PASSWORDS, DEMO_USERS
+        from .seeds import DEMO_PASSWORDS, DEMO_USERS, bootstrap_core_data
 
         for spec in DEMO_USERS:
             self.identity.ensure_user(
@@ -71,7 +78,15 @@ class RadarService:
                 username=spec["id"],
                 password=DEMO_PASSWORDS.get(spec["id"]),
             )
-            bootstrap_user_dir(self.root / "users" / spec["id"], spec)
+            user_root = self.root / "users" / spec["id"]
+            bootstrap_user_dir(user_root, spec)
+            bootstrap_core_data(
+                self.tasks_service,
+                self.work_notes_service,
+                self.work_events_service,
+                user_root,
+                spec["id"],
+            )
 
     def for_user(self, user_id: str | None = None) -> UserScope:
         return self._scope(user_id)
@@ -104,7 +119,13 @@ class RadarService:
             workspace=Workspace(root, observe_path=self.observe_path),
             hierarchy=HierarchicalMemory(root, local),
             notify=NotificationLog(root),
-            work=WorkMemory(root, uid),
+            work=WorkMemory(
+                root, uid,
+                tasks_service=self.tasks_service,
+                events_service=self.work_events_service,
+                notes_service=self.work_notes_service,
+                reminders_service=self.reminders_service,
+            ),
         )
 
     def _find_item(self, scope: UserScope, item_id: str) -> dict | None:
@@ -520,6 +541,18 @@ class RadarService:
 
         uid = self.identity.require(user_id)
         return project_snapshot(self, uid)
+
+    def work_summary(self, user_id: str | None = None, range_days: int = 7, now=None) -> dict:
+        from .skills.work_summary.service import build_work_summary
+
+        uid = self.identity.require(user_id)
+        return build_work_summary(self, uid, range_days=max(1, min(int(range_days or 7), 90)), now=now)
+
+    def work_period_summary(self, kind: str, user_id: str | None = None, project_id: str | None = None) -> dict:
+        from .skills.work_summary.service import build_period_overview
+
+        uid = self.identity.require(user_id)
+        return build_period_overview(self, uid, kind, project_id=project_id)
 
     def list_project_trackers(self, user_id: str | None = None) -> dict:
         from .skills.project_tracker.service import list_trackers

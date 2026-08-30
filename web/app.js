@@ -66,6 +66,8 @@ const state = {
   conversationProfile: null,
   chatBusy: false,
   reportType: "daily",
+  workSummary: null,
+  summaryRange: "7",
   pendingChatExample: "",
 };
 
@@ -356,8 +358,8 @@ function pageHome() {
   return `
     <div class="page-head">
       <div>
-        <h1>${greeting()}，今天有 ${openTasks.length || 0} 件工作值得优先关注。</h1>
-        <p>秘书会记住你的事项，结合截止日期和进度主动提醒，同时继续观察与当前项目相关的资料。</p>
+        ${pageHomeTaskBrief(dash) || `<h1>${greeting()}，今天有 ${openTasks.length || 0} 件工作值得优先关注。</h1>`}
+        <p>${pageHomeTaskBrief(dash) ? "秘书会记住你的事项，结合截止日期和进度主动提醒，同时继续观察与当前项目相关的资料。" : "秘书会记住你的事项，结合截止日期和进度主动提醒，同时继续观察与当前项目相关的资料。"}</p>
       </div>
       <div class="actions">
         <button class="btn" id="refreshBtn" type="button">刷新源</button>
@@ -421,6 +423,61 @@ function goalMini(label, goal) {
 function emptyFeed() {
   return `<div class="empty">还没有筛出内容。点「刷新源」，Agent 会走采集 → 理解 → 记忆匹配 → 为你排序。</div>`;
 }
+
+// Task Card 组件（复用现有风格）
+function taskCard(task) {
+  const priorityColor = { urgent: "var(--danger)", high: "var(--warn)", medium: "var(--brand)", low: "var(--muted)" };
+  const priorityStyle = `background:${priorityColor[task.priority] || priorityColor.medium}22;color:${priorityColor[task.priority] || priorityColor.medium}`;
+  const deadlineText = task.deadline ? new Date(task.deadline).toLocaleDateString("zh-CN", { month: "short", day: "numeric" }) : "";
+  
+  return `<div class="card task-card" style="border-left:3px solid ${priorityColor[task.priority] || priorityColor.medium}">
+    <div class="item-top">
+      <div class="rel">
+        <span class="chip">${escapeHtml(task.priority || "medium")}</span>
+        ${deadlineText ? `<span class="tiny" style="margin-left:8px">${deadlineText}</span>` : ""}
+      </div>
+      <a class="tiny" href="#/work?task=${task.id}" aria-label="查看详情">详情</a>
+    </div>
+    <h3>${escapeHtml(task.title)}</h3>
+    ${task.project ? `<p class="tiny" style="margin-top:4px">📁 ${escapeHtml(task.project)}</p>` : ""}
+    ${task.description ? `<p class="task-desc">${escapeHtml(task.description.slice(0, 100))}${task.description.length > 100 ? "..." : ""}</p>` : ""}
+  </div>`;
+}
+
+// 今日工作 Brief（替换纯推荐数字为今日建议优先处理）
+function pageHomeTaskBrief(dash) {
+  const tasks = (dash.work || {}).tasks || [];
+  const openTasks = tasks.filter(t => t.status === "todo");
+  const urgent = openTasks.filter(t => t.priority === "urgent" || t.priority === "high");
+  const todayDeadlines = openTasks.filter(t => t.deadline && new Date(t.deadline).toDateString() === new Date().toDateString());
+  const overdue = openTasks.filter(t => t.deadline && new Date(t.deadline) < new Date());
+  
+  if (!urgent.length && !todayDeadlines.length && !overdue.length) {
+    return null;
+  }
+  
+  let html = `<div class="card work-brief">`;
+  html += `<div class="page-head" style="margin:0 0 12px"><h2 style="margin:0">今天建议优先处理</h2></div>`;
+  
+  if (urgent.length) {
+    html += `<p><strong>紧急/高优先级：</strong>${urgent.map(t => escapeHtml(t.title)).join("；")}</p>`;
+  }
+  if (todayDeadlines.length) {
+    html += `<p><strong>今天截止：</strong>${todayDeadlines.map(t => `${escapeHtml(t.title)}（${new Date(t.deadline).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}）`).join("；")}</p>`;
+  }
+  if (overdue.length) {
+    html += `<p><strong>已过期未完成：</strong>${overdue.map(t => escapeHtml(t.title)).join("；")}</p>`;
+  }
+  
+  html += `<div class="chips" style="margin-top:12px">`;
+  html += `<a class="btn-ghost" href="#/work">查看全部待办</a>`;
+  html += `<a class="btn-ghost" href="#/recommend?tab=work">查看工作相关推荐</a>`;
+  html += `</div>`;
+  html += `</div>`;
+  
+  return html;
+}
+
 
 function pageRecommend() {
   const dash = state.dash;
@@ -627,49 +684,108 @@ function pageWork() {
     </div>`;
 }
 
+function reportDayCard(day, reports) {
+  const stats = day.stats || {};
+  const metrics = [];
+  if (stats.completed) metrics.push(`完成 ${stats.completed}`);
+  if (stats.in_progress) metrics.push(`进行中 ${stats.in_progress}`);
+  if (stats.knowledge) metrics.push(`知识 ${stats.knowledge}`);
+  if (stats.decisions) metrics.push(`决策 ${stats.decisions}`);
+  const items = [];
+  (day.top_completed || []).forEach((t) => items.push(`<li class="day-item is-done">✓ ${escapeHtml(t)}</li>`));
+  (day.top_in_progress || []).forEach((t) => items.push(`<li class="day-item is-doing">◉ ${escapeHtml(t)}</li>`));
+  if (day.more_completed) items.push(`<li class="day-item is-more">还有 ${day.more_completed} 项已完成</li>`);
+  if (day.more_in_progress) items.push(`<li class="day-item is-more">还有 ${day.more_in_progress} 项进行中</li>`);
+  const dateObj = new Date(day.date + "T00:00:00");
+  const monthDay = `${String(dateObj.getMonth() + 1).padStart(2, "0")}月${String(dateObj.getDate()).padStart(2, "0")}日`;
+  const report = reports.find((row) => row.report_type === "daily" && (row.start_time || "").slice(0, 10) === day.date);
+  const summary = day.summary || (day.date === new Date().toISOString().slice(0, 10) ? "今天还没有完成事项" : "当天没有工作记录");
+  return `<section class="day-card" id="day-${day.date}">
+    <div class="day-head">
+      <b>${monthDay}${day.day_label ? ` · ${day.day_label}` : ""}</b>
+      ${metrics.length ? `<span class="day-metrics">${metrics.map((m) => `<i>${escapeHtml(m)}</i>`).join("")}</span>` : ""}
+    </div>
+    <p class="day-summary">${escapeHtml(summary)}</p>
+    ${items.length ? `<ul class="day-items">${items.join("")}</ul>` : ""}
+    ${(day.decisions || []).length ? `<p class="day-decision"><b>关键决策</b>${escapeHtml(day.decisions[0])}</p>` : ""}
+    ${(day.risks || []).length ? `<p class="day-risk"><b>风险</b>${escapeHtml(day.risks[0])}</p>` : ""}
+    ${report ? `<details class="day-detail"><summary>查看完整日报</summary><pre class="report-copy">${escapeHtml(report.content || "")}</pre><div class="day-actions"><button class="btn-ghost" data-copy-report="${escapeHtml(report.id)}" type="button">复制</button><button class="btn-ghost" data-export-report="${escapeHtml(report.id)}" type="button">导出</button><button class="btn-ghost" data-regen-report="${escapeHtml(day.date)}" type="button">重新生成</button></div></details>` : `<button class="btn-ghost" data-regen-report="${escapeHtml(day.date)}" type="button">生成当天日报</button>`}
+  </section>`;
+}
+
 function pageReports() {
   const desk = workDesk();
   const kind = state.reportType || "daily";
-  const tabs = [
-    ["daily", "今日日报"],
-    ["weekly", "本周周报"],
-    ["monthly", "月度总结"],
-    ["project_summary", "项目总结"],
-  ];
-  const reports = (desk.reports || []).filter((row) => row.report_type === kind);
-  const current = reports[0];
+  const summary = state.workSummary;
+  const reports = (desk.reports || []);
+  const dailyReports = reports.filter((row) => row.report_type === "daily");
+  const current = reports.filter((row) => row.report_type === kind)[0];
   const src = (current && current.sources) || {};
-  const labels = { tasks: "Task", events: "工作事件", notes: "工作记录", goals: "目标", knowledge: "知识条目", decisions: "Decision", recommendations: "相关推荐" };
+  const stats = (summary && summary.stats) || {};
+  const days = (summary && summary.days) || [];
+  const projects = (summary && summary.projects) || [];
+  const period = (summary && summary.period) || {};
+  const tabs = [
+    ["daily", "今日"],
+    ["weekly", "本周"],
+    ["monthly", "本月"],
+    ["project_summary", "项目"],
+  ];
+  const historyByMonth = {};
+  dailyReports.forEach((row) => {
+    const key = (row.start_time || "").slice(0, 7);
+    if (!key) return;
+    (historyByMonth[key] = historyByMonth[key] || []).push(row);
+  });
   return `
     <div class="page-head">
       <div>
         <h1>工作总结</h1>
-        <p>根据 Task、工作事件、目标和知识库自动汇总，而不是让你从空白文档写起。</p>
+        <p>按日期回顾每天做了什么，需要时再展开完整日报。</p>
       </div>
       <div class="actions">
+        <select id="summaryRange" class="input" style="width:auto">
+          <option value="7"${state.summaryRange === "7" ? " selected" : ""}>最近 7 天</option>
+          <option value="30"${state.summaryRange === "30" ? " selected" : ""}>最近 30 天</option>
+        </select>
         <button class="btn" id="generateReportBtn" type="button">一键生成</button>
-        ${current ? `<button class="btn-ghost" id="copyReportBtn" type="button">复制</button>
-        <button class="btn-ghost" id="exportReportBtn" type="button">导出</button>` : ""}
       </div>
     </div>
     <div class="tabs">
       ${tabs.map(([id, label]) => `<button class="tab${kind === id ? " is-on" : ""}" data-report-tab="${id}" type="button">${label}</button>`).join("")}
     </div>
+    <div class="stats" style="margin-top:16px">
+      ${stat("完成", stats.completed, period.start ? `${(period.start || "").slice(5)} 起` : "统计中")}
+      ${stat("进行中", stats.in_progress, "持续推进")}
+      ${stat("知识沉淀", stats.knowledge, "收藏与笔记")}
+      ${stat("关键决策", stats.decisions, "方向性记录")}
+    </div>
     <div class="layout" style="margin-top:16px">
-      <section class="card">
-        ${current ? `<div class="page-head" style="margin:0 0 12px"><h2 style="margin:0">${escapeHtml(current.title || tabs.find((row) => row[0] === kind)?.[1] || "报告")}</h2><span class="tiny">${escapeHtml(fmtTime(current.created_at))}</span></div>
-          <pre class="report-copy" id="reportContent">${escapeHtml(current.content || "")}</pre>
-          <div class="field" style="margin-top:14px"><label>编辑</label><textarea id="reportEditor" rows="8">${escapeHtml(current.content || "")}</textarea></div>
-          <button class="btn-ghost" id="saveReportBtn" type="button" data-report-id="${escapeHtml(current.id)}">保存修改</button>` : `<p class="tiny">还没有这份总结。点「一键生成」，我会从你的待办、事件和项目记忆里汇总。</p>`}
+      <section class="stack">
+        ${summary ? `<section class="card ai-summary"><h3>AI 工作摘要</h3><p>${escapeHtml(summary.summary || "暂无足够数据生成摘要。")}</p></section>` : ""}
+        ${kind === "daily" || kind === "weekly" || kind === "monthly" ? `
+        <div class="timeline">
+          ${days.length ? days.map((day) => reportDayCard(day, dailyReports)).join("") : `<section class="card"><p class="tiny">这段时间还没有工作记录。对话里说「周五前完成 PPT」就会开始积累。</p></section>`}
+        </div>` : `
+        <section class="card">
+          <h3>${escapeHtml((current && current.title) || "项目总结")}</h3>
+          ${current ? `<pre class="report-copy">${escapeHtml(current.content || "")}</pre>` : `<p class="tiny">还没有项目总结。点「一键生成」从任务和事件汇总。</p>`}
+          ${(summary && summary.events || []).length ? `<h3 style="margin-top:16px">项目动态</h3><ul class="day-items">${summary.events.map((e) => `<li class="day-item"><span class="day-date">${escapeHtml(e.date)}</span>${escapeHtml(e.title || "")}</li>`).join("")}</ul>` : ""}
+        </section>`}
+        ${current && kind !== "project_summary" ? `<details class="card"><summary>完整${tabs.find((row) => row[0] === kind)?.[1] || ""}报告</summary><pre class="report-copy">${escapeHtml(current.content || "")}</pre><div class="field" style="margin-top:14px"><label>编辑</label><textarea id="reportEditor" rows="8">${escapeHtml(current.content || "")}</textarea></div><button class="btn-ghost" id="saveReportBtn" type="button" data-report-id="${escapeHtml(current.id)}">保存修改</button></details>` : ""}
       </section>
       <aside class="stack">
         <section class="card">
-          <h3>本次使用数据</h3>
-          ${current ? Object.entries(labels).map(([key, label]) => `<p>${src[key] || 0} 个${label}</p>`).join("") : "<p class='tiny'>生成后会列出用了多少 Task、事件和知识。</p>"}
+          <h3>本周主要项目</h3>
+          ${projects.length ? projects.map((p) => `<p>${escapeHtml(p.project)} · ${p.events} 条动态</p>`).join("") : "<p class='tiny'>暂无项目动态。</p>"}
         </section>
+        <details class="card">
+          <summary><b>生成依据</b></summary>
+          ${current ? `<p>Task ${src.tasks || 0}</p><p>WorkEvent ${src.events || 0}</p><p>WorkNote ${src.notes || 0}</p><p>Goal ${src.goals || 0}</p><p>Knowledge ${src.knowledge || 0}</p><p>Decision ${src.decisions || 0}</p>` : "<p class='tiny'>生成报告后显示。</p>"}
+        </details>
         <section class="card">
           <h3>历史</h3>
-          ${reports.length ? reports.slice(0, 5).map((row) => `<p class="tiny">${escapeHtml(row.title || "")}</p>`).join("") : "<p class='tiny'>每次生成都会留下一版，方便对照。</p>"}
+          ${Object.keys(historyByMonth).length ? Object.keys(historyByMonth).sort().reverse().map((month) => `<div class="history-month"><b>${month.replace("-", "月")}月</b>${historyByMonth[month].map((row) => `<a class="tiny" href="#day-${(row.start_time || "").slice(0, 10)}" data-jump-day="${(row.start_time || "").slice(0, 10)}">${escapeHtml((row.start_time || "").slice(5, 10).replace("-", "/"))}</a>`).join("")}</div>`).join("") : "<p class='tiny'>生成日报后会按日期归档。</p>"}
         </section>
       </aside>
     </div>`;
@@ -1266,6 +1382,11 @@ async function load() {
   state.dash = await api("/api/dashboard");
   state.userId = state.dash.current_user || state.userId;
   if (state.route === "/chat" && !state.chatSessions.length) await loadChatState(true);
+  if (state.route === "/reports") {
+    try {
+      state.workSummary = await api(`/api/work/summary?days=${encodeURIComponent(state.summaryRange || "7")}`);
+    } catch { state.workSummary = null; }
+  }
   hideAuth();
   render();
 }
@@ -1331,7 +1452,7 @@ async function refreshFeeds(btn) {
 }
 
 document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-act],[data-open],[data-rectab],[data-filter],[data-cat],[data-card],[data-topic],[data-example],[data-toggle],[data-move],[data-followkind],[data-chat-session],[data-chat-example],[data-task-act],[data-report-tab],[data-skill],[data-llm-preset],#newChatBtn,#saveConversationProfileBtn,#refreshBtn,#refreshBtn2,#followBtn,#addGoalBtn,#savePrefBtn,#savePushBtn,#pushNowBtn,#briefBtn,#noticeBtn,#saveProfileBtn,#exportBtn,#addProductBtn,#addSourceBtn,#addFollowGoalBtn,#logoutBtn,#savePassBtn,#saveFeishuBtn,#llmEnabledBtn,#saveLlmBtn,#testLlmBtn,#generateReportBtn,#copyReportBtn,#exportReportBtn,#saveReportBtn");
+  const t = event.target.closest("[data-act],[data-open],[data-rectab],[data-filter],[data-cat],[data-card],[data-topic],[data-example],[data-toggle],[data-move],[data-followkind],[data-chat-session],[data-chat-example],[data-task-act],[data-report-tab],[data-skill],[data-llm-preset],[data-copy-report],[data-export-report],[data-regen-report],[data-jump-day],#newChatBtn,#saveConversationProfileBtn,#refreshBtn,#refreshBtn2,#followBtn,#addGoalBtn,#savePrefBtn,#savePushBtn,#pushNowBtn,#briefBtn,#noticeBtn,#saveProfileBtn,#exportBtn,#addProductBtn,#addSourceBtn,#addFollowGoalBtn,#logoutBtn,#savePassBtn,#saveFeishuBtn,#llmEnabledBtn,#saveLlmBtn,#testLlmBtn,#generateReportBtn,#copyReportBtn,#exportReportBtn,#saveReportBtn");
   if (!t) return;
   if (t.dataset.chatSession) {
     state.activeSessionId = t.dataset.chatSession;
@@ -1370,7 +1491,41 @@ document.addEventListener("click", async (event) => {
   }
   if (t.dataset.reportTab) {
     state.reportType = t.dataset.reportTab;
-    return render();
+    await load();
+    return;
+  }
+  if (t.id === "summaryRange" || t.closest("#summaryRange")) {
+    return;
+  }
+  if (t.dataset.copyReport) {
+    const row = (workDesk().reports || []).find((r) => r.id === t.dataset.copyReport);
+    const text = row ? row.content || "" : "";
+    if (!text) return toast("还没有可复制的内容");
+    await navigator.clipboard.writeText(text).catch(() => {});
+    toast("已复制到剪贴板。");
+    return;
+  }
+  if (t.dataset.exportReport) {
+    const row = (workDesk().reports || []).find((r) => r.id === t.dataset.exportReport);
+    const text = row ? row.content || "" : "";
+    if (!text) return toast("还没有可导出的内容");
+    const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `daily-${t.dataset.exportReport}.md`;
+    a.click();
+    toast("已导出 Markdown。");
+    return;
+  }
+  if (t.dataset.regenReport) {
+    await api("/api/work/reports/generate", { method: "POST", body: JSON.stringify({ report_type: "daily", start_time: `${t.dataset.regenReport}T00:00:00+08:00`, end_time: `${t.dataset.regenReport}T23:59:59+08:00` }) });
+    toast("已重新生成当天日报。");
+    return load();
+  }
+  if (t.dataset.jumpDay) {
+    const target = document.getElementById(`day-${t.dataset.jumpDay}`);
+    if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
   }
   if (t.id === "generateReportBtn") {
     await api("/api/work/reports/generate", { method: "POST", body: JSON.stringify({ report_type: state.reportType || "daily" }) });
@@ -1639,6 +1794,11 @@ document.addEventListener("change", async (event) => {
   if (t.dataset.sort) {
     state.recSort = t.value;
     return render();
+  }
+  if (t.id === "summaryRange") {
+    state.summaryRange = t.value || "7";
+    await load();
+    return;
   }
   if (t.dataset.move) {
     const out = await api("/api/cards/move", { method: "POST", body: JSON.stringify({ id: t.dataset.move, category: t.value }) });

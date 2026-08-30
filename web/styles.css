@@ -332,6 +332,56 @@ button { cursor: pointer; }
   display: inline;
 }
 
+/* Task Card - 增强样式 */
+.task-card {
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: var(--card);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+.task-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transform: translateY(-1px);
+}
+.task-card .item-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.task-card h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  line-height: 1.4;
+}
+.task-desc {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* 今日工作 Brief */
+.work-brief {
+  background: linear-gradient(135deg, #eef2ff 0%, #eff6ff 100%);
+  border: 1px solid #c7d2fe;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.work-brief .page-head {
+  margin-bottom: 12px;
+}
+.work-brief p {
+  margin: 8px 0;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.work-brief strong {
+  color: var(--brand);
+}
+
 .item {
   display: grid;
   gap: 8px;
@@ -574,3 +624,33 @@ button { cursor: pointer; }
   .chat-compose { grid-template-columns: 1fr; }
   .chat-send { width: 100%; }
 }
+
+/* Work Summary timeline */
+.ai-summary h3 { margin: 0 0 8px; }
+.ai-summary p { margin: 0; line-height: 1.7; }
+.timeline { display: flex; flex-direction: column; gap: 12px; position: relative; padding-left: 18px; }
+.timeline::before { content: ""; position: absolute; left: 5px; top: 8px; bottom: 8px; width: 2px; background: var(--line); border-radius: 1px; }
+.day-card { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; box-shadow: var(--shadow); }
+.day-card::before { content: ""; position: absolute; left: -18px; top: 22px; width: 10px; height: 10px; border-radius: 50%; background: var(--brand); border: 2px solid var(--card); box-shadow: 0 0 0 2px var(--brand-soft); }
+.day-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.day-head b { font-size: 15px; }
+.day-metrics { display: flex; gap: 8px; flex-wrap: wrap; }
+.day-metrics i { font-style: normal; font-size: 12px; color: var(--muted); background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; }
+.day-summary { margin: 10px 0 8px; color: var(--ink); line-height: 1.6; }
+.day-items { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.day-item { font-size: 13px; line-height: 1.5; }
+.day-item.is-done { color: var(--ok); }
+.day-item.is-doing { color: var(--brand); }
+.day-item.is-more { color: var(--muted); }
+.day-item .day-date { color: var(--muted); margin-right: 8px; font-variant-numeric: tabular-nums; }
+.day-decision, .day-risk { margin: 6px 0 0; font-size: 13px; line-height: 1.6; }
+.day-decision b, .day-risk b { display: inline-block; margin-right: 8px; font-size: 12px; border-radius: 4px; padding: 1px 8px; }
+.day-decision b { color: var(--brand); background: var(--brand-soft); }
+.day-risk b { color: var(--danger); background: #fef2f2; }
+.day-detail summary, details.card summary, details summary { cursor: pointer; color: var(--brand); font-size: 13px; }
+.day-detail summary { margin-top: 4px; }
+.day-actions { display: flex; gap: 8px; margin-top: 10px; }
+.history-month { margin-bottom: 10px; }
+.history-month b { display: block; font-size: 13px; margin-bottom: 4px; }
+.history-month a { display: inline-block; margin-right: 10px; }
+details.card > summary { margin-bottom: 10px; }

@@ -198,6 +198,21 @@ def make_handler(service: RadarService):
         "user",
         lambda h, uid, _p, query, *_: h._json(200, {"items": service.list_reports(uid, _q(query, "type") or None)}),
     )
+    add(
+        "GET",
+        "/api/work/summary",
+        "user",
+        lambda h, uid, _p, query, *_: h._json(
+            200,
+            service.work_period_summary(
+                _q(query, "kind") or "week",
+                user_id=uid,
+                project_id=_q(query, "project_id") or None,
+            )
+            if (_q(query, "kind") or "") not in {"", "timeline", "7", "30"}
+            else service.work_summary(uid, range_days=int(_q(query, "days") or 7)),
+        ),
+    )
     add("GET", "/api/projects", "user", lambda h, uid, *_: h._json(200, service.list_project_trackers(uid)))
     add("GET", "/api/project/tracker", "user", lambda h, uid, *_: h._json(200, service.project_tracker(uid)))
     add("GET", "/api/work/tracker", "user", lambda h, uid, *_: h._json(200, service.project_tracker(uid)))

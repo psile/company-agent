@@ -59,7 +59,7 @@ def test_demo_long_term_memory_survives_new_session(tmp_path, monkeypatch):
     assert first["intent"] == "save_memory"
     second = _chat(svc, "alice", "我最近主要研究什么？")
     assert second["session_id"] != first["session_id"]
-    assert second["intent"] == "query_memory"
+    assert second["intent"] in {"search_memory", "query_memory"}
     assert "个人 AI 秘书" in second["reply"]
     assert "Agent Memory" in second["reply"]
 

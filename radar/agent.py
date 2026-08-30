@@ -28,6 +28,8 @@ INTENTS = {
     "query_project",
     "update_task",
     "breakdown_task",
+    "save_note",
+    "search_memory",
     "save_memory",
     "query_memory",
     "save_knowledge",
@@ -93,6 +95,8 @@ class IntentRouter:
             ("create_task", r"提醒我"),
             ("create_task", r"(记一下|帮我记|记下).{0,30}(要|完成|做|验证|发|准备|整理)"),
             ("update_task", r"(完成了|标记完成|开始做).{0,8}(任务|待办)?"),
+            ("save_note", r"(记一下|帮我记|记下).{0,30}(要|完成|做|验证|发|准备|整理)"),
+            ("search_memory", r"(你记得|还记得|我最近主要(研究|在做)什么|我在研究什么|我主要研究什么|最近在研究)"),
             ("create_watch", r"(帮我|开始|持续|最近).{0,8}(关注|跟踪|追踪|盯住)"),
             ("update_watch", r"(提高|降低|取消|停止).{0,8}(关注|跟踪|追踪)"),
             ("create_goal", r"(创建|新增|记下|设定).{0,6}(目标|计划)"),
@@ -124,7 +128,7 @@ class IntentRouter:
             entities["source_types"] = _source_types(text)
         if intent in {"create_goal", "save_knowledge"}:
             entities["title"] = _clean_command(text)
-        if intent in {"search_info", "query_knowledge", "query_memory"}:
+        if intent in {"search_info", "query_knowledge", "query_memory", "search_memory"}:
             entities["query"] = text
         if intent == "generate_report":
             entities["report_type"] = infer_report_type(text)
@@ -191,7 +195,7 @@ class ConversationAgent:
             actions.append(_public_action(action, topics))
             memory_updated = bool(action.get("result", {}).get("ok"))
             reply = "记住了。" + (f"你最近主要在做 {project}，" if project else "") + (f"重点方向包括 {'、'.join(topics)}。" if topics else "我会把这条作为长期背景使用。")
-        elif intent == "query_memory":
+        elif intent in {"query_memory", "search_memory"}:
             action = await self.tools.execute("search_memory", user_id, query=entities.get("query") or message)
             actions.append(_public_action(action))
             reply = _memory_reply(action.get("result") or {})

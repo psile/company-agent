@@ -26,10 +26,31 @@ class TaskCaptureSkill:
         message = str((payload or {}).get("message") or "")
         ctx = self._context(user_id, context)
         extracted = extract_tasks(message, ctx)
+        
+        # 置信度在中间区间时询问用户
+        if extracted.get("in_middle_confidence_range", False):
+            titles = "、".join(row["title"] for row in extracted["tasks"][:3])
+            return {
+                "ok": True,
+                "created": [],
+                "pending": True,
+                "reply": f"我理解这可能是一个待办（{titles}），需要帮你记下来吗？",
+            }
+        
         if extracted.get("should_create_note") and extracted.get("note"):
             note = self.service.add_work_note(
                 {"content": extracted["note"], "project_id": ctx.get("project_id") or "", "tags": ["conversation"]},
                 user_id=user_id,
+            )
+            # 自动记录 WorkEvent
+            self.service.work_events_service.record(
+                event_type="note_created",
+                user_id=user_id,
+                title="工作笔记",
+                content=extracted["note"][:1200],
+                metadata={"source_type": "conversation"},
+                source_type="conversation",
+                source_ref="",
             )
             return {
                 "ok": True,
@@ -48,6 +69,25 @@ class TaskCaptureSkill:
                 "reply": f"我理解这是一个待办（{titles}），需要帮你记下来吗？",
             }
         created = [self.service.create_task(row, user_id=user_id) for row in extracted["tasks"]]
+        # 自动记录 WorkEvent
+        from ...core.schemas import WORK_EVENT_TYPES
+        
+        for task in created:
+            self.service.work_events_service.record(
+                event_type="task_created",
+                user_id=user_id,
+                title=task["title"],
+                content=task.get("description") or "",
+                metadata={
+                    "project_id": task.get("project_id"),
+                    "priority": task.get("priority"),
+                    "deadline": task.get("deadline"),
+                },
+                source_type=task.get("source_type"),
+                source_ref=task["id"],
+                task_id=task["id"],
+                project_id=task.get("project_id"),
+            )
         if has_clock(message):
             from ...reminders.schemas import infer_trigger_at
 

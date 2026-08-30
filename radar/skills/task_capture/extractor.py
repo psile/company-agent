@@ -12,6 +12,7 @@ from .prompts import BREAKDOWN_SYSTEM, EXTRACT_SYSTEM
 
 CST = timezone(timedelta(hours=8))
 AUTO_CREATE = 0.75
+MEDIUM_CONFIDENCE_RANGE = (0.45, 0.75)  # 中间区间询问用户
 NOT_TASK = re.compile(r"(你觉得|帮我解释|怎么样|什么是|为何|为什么这样|值得看的|有什么进展)")
 STRONG_TASK = re.compile(
     r"(周五|星期[一二三四五六日天]|周[一二三四五六日]|明天|后天|这周|本周|下周).{0,24}(完成|做完|整理|准备|发|写|验证|做)"
@@ -158,10 +159,13 @@ def _normalize_extract(parsed: dict[str, Any], context: dict[str, Any] | None) -
         )
     confidence = float(parsed.get("confidence") or 0)
     should = bool(parsed.get("should_create_task")) and bool(tasks)
+    # 判断置信度区间
+    in_middle_range = MEDIUM_CONFIDENCE_RANGE[0] <= confidence < MEDIUM_CONFIDENCE_RANGE[1]
     return {
         "should_create_task": should,
         "should_create_note": bool(parsed.get("should_create_note")) and not should,
         "confidence": confidence,
+        "in_middle_confidence_range": in_middle_range,
         "tasks": tasks if should else [],
         "note": str(parsed.get("note") or "").strip(),
     }
