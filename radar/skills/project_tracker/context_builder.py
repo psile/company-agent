@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...reminders.schemas import hours_until, parse_dt
+from ...reminders.schemas import hours_until, now_cst, parse_dt
 from .schemas import belongs_to_project, knowledge_matches
 
 
@@ -28,18 +28,34 @@ def build_snapshot(service: Any, user_id: str, project: dict[str, Any] | None = 
     notes = [row for row in scope.work.notes() if belongs_to_project(row, meta) or (pid and row.get("project_id") == pid)]
     goals = list(scope.workspace.goals() or [])
     knowledge = [row for row in (scope.memory.cards() or []) if knowledge_matches(row, meta)][:8]
-    risks = _risks(open_tasks, blocked, notes, scope.work.reminders(), children)
-    next_steps = _next_steps(open_tasks, children)
+    acceptance = _acceptance(meta.get("acceptance_criteria") or [])
+    milestones = _milestones(meta.get("milestones") or [])
+    risks = _risks(open_tasks, blocked, notes, scope.work.reminders(), children, milestones, str(meta.get("target_date") or ""))
+    next_steps = _next_steps(open_tasks, children, milestones, acceptance)
     estimated = estimate_progress(roots, children, goals, events)
-    target = _target(open_tasks, goals)
+    if milestones:
+        milestone_score = sum(1 for row in milestones if row.get("status") == "done") / len(milestones)
+        estimated = int(round(estimated * 0.75 + milestone_score * 25))
+    target = str(meta.get("objective") or "").strip() or _target(open_tasks, goals)
+    status_code = str(meta.get("status") or "active")
+    status_labels = {"planning": "准备中", "active": "进行中", "paused": "已暂停", "done": "已完成"}
     return {
         "user_id": scope.user_id,
         "project": str(meta.get("project") or "当前项目"),
         "project_id": pid,
+        "summary": str(meta.get("summary") or ""),
+        "objective": str(meta.get("objective") or ""),
         "stage": str(meta.get("stage") or ""),
-        "status": _status(roots, open_tasks),
+        "status": status_labels.get(status_code, _status(roots, open_tasks)),
+        "status_code": status_code,
         "priority": str(meta.get("priority") or "medium"),
+        "start_date": str(meta.get("start_date") or ""),
+        "target_date": str(meta.get("target_date") or ""),
         "topics": list(meta.get("topics") or []),
+        "acceptance_criteria": acceptance,
+        "acceptance_progress": int(round(100 * sum(1 for row in acceptance if row.get("done")) / max(1, len(acceptance)))) if acceptance else 0,
+        "milestones": milestones,
+        "milestone_progress": int(round(100 * sum(1 for row in milestones if row.get("status") == "done") / max(1, len(milestones)))) if milestones else 0,
         "estimated_progress": estimated,
         "progress_basis": "tasks+goals+events",
         "target": target,
@@ -125,11 +141,22 @@ def _target(open_tasks: list[dict[str, Any]], goals: list[dict[str, Any]]) -> st
     return str(goal.get("title") or "") if goal else ""
 
 
-def _next_steps(open_tasks: list[dict[str, Any]], children: list[dict[str, Any]]) -> list[str]:
+def _next_steps(
+    open_tasks: list[dict[str, Any]],
+    children: list[dict[str, Any]],
+    milestones: list[dict[str, Any]],
+    acceptance: list[dict[str, Any]],
+) -> list[str]:
+    pending_milestones = [row for row in milestones if row.get("status") != "done"]
+    pending_milestones.sort(key=lambda row: str(row.get("due_date") or "9999"))
+    lines = [f"推进里程碑：{row['title']}" for row in pending_milestones[:2]]
     incomplete = [row for row in children if row.get("status") not in {"done", "cancelled"}]
     pool = incomplete or open_tasks
     pool = sorted(pool, key=lambda row: (str(row.get("deadline") or "9"), str(row.get("title") or "")))
-    return [str(row.get("title") or "") for row in pool if row.get("title")]
+    lines.extend(str(row.get("title") or "") for row in pool if row.get("title"))
+    if not lines:
+        lines.extend(f"确认验收项：{row['text']}" for row in acceptance if not row.get("done"))
+    return lines[:5]
 
 
 def _risks(
@@ -138,6 +165,8 @@ def _risks(
     notes: list[dict[str, Any]],
     reminders: list[dict[str, Any]],
     children: list[dict[str, Any]],
+    milestones: list[dict[str, Any]],
+    target_date: str,
 ) -> list[str]:
     lines = [f"{row.get('title')} 处于阻塞" for row in blocked if row.get("title")]
     for row in open_tasks:
@@ -154,12 +183,51 @@ def _risks(
     for row in reminders or []:
         if row.get("reminder_type") == "risk" and row.get("generated_content"):
             lines.append(str(row.get("generated_content") or "").split("。")[0][:80])
+    today = now_cst().date().isoformat()
+    for row in milestones:
+        due = str(row.get("due_date") or "")
+        if due and due < today and row.get("status") != "done":
+            lines.append(f"里程碑「{row.get('title')}」已逾期")
+    if target_date and target_date < today:
+        lines.append("项目计划完成日期已过，但项目尚未关闭")
     seen: set[str] = set()
     out = []
     for line in lines:
         if line and line not in seen:
             seen.add(line)
             out.append(line)
+    return out
+
+
+def _acceptance(rows: list[Any]) -> list[dict[str, Any]]:
+    out = []
+    for index, row in enumerate(rows):
+        if isinstance(row, dict):
+            text = str(row.get("text") or row.get("title") or "").strip()
+            done = bool(row.get("done"))
+            row_id = str(row.get("id") or f"accept-{index + 1}")
+        else:
+            text, done, row_id = str(row or "").strip(), False, f"accept-{index + 1}"
+        if text:
+            out.append({"id": row_id, "text": text, "done": done})
+    return out
+
+
+def _milestones(rows: list[Any]) -> list[dict[str, Any]]:
+    out = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            row = {"title": str(row or "")}
+        title = str(row.get("title") or "").strip()
+        if title:
+            out.append(
+                {
+                    "id": str(row.get("id") or f"milestone-{index + 1}"),
+                    "title": title,
+                    "due_date": str(row.get("due_date") or "")[:10],
+                    "status": str(row.get("status") or "pending"),
+                }
+            )
     return out
 
 

@@ -69,6 +69,13 @@ const state = {
   workSummary: null,
   summaryRange: "7",
   pendingChatExample: "",
+  workDate: localDateKey(new Date()),
+  workView: "day",
+  taskEditorOpen: false,
+  editingTaskId: null,
+  pendingTaskProject: null,
+  projectEditorOpen: false,
+  editingProjectId: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -370,7 +377,7 @@ function pageHome() {
       ${stat("工作推荐", stats.work, "+工作上下文", "#/recommend?tab=work")}
       ${stat("个人推荐", stats.personal, "长期兴趣", "#/recommend?tab=personal")}
       ${stat("新增知识", stats.knowledge, "点赞/收藏沉淀", "#/knowledge")}
-      ${stat("待处理反馈", stats.pending_feedback, "让它更懂你", "#/feedback")}
+      ${stat("待处理反馈", stats.pending_feedback, "让它更懂你", "#/recommend?tab=feedback")}
     </div>
     <div class="layout">
       <section class="stack">
@@ -481,7 +488,19 @@ function pageHomeTaskBrief(dash) {
 
 function pageRecommend() {
   const dash = state.dash;
-  const pool = state.recTab === "work" ? dash.work || [] : dash.personal || [];
+  const handledIds = new Set(
+    (dash.events || [])
+      .filter((row) => ["like", "useful", "collect", "star", "dislike", "skip", "dismiss"].includes(row.action))
+      .map((row) => row.id)
+  );
+  const feedbackPool = Array.isArray(dash.pending_feedback)
+    ? dash.pending_feedback
+    : [...(dash.work || []), ...(dash.personal || [])]
+      .filter((row, index, rows) => rows.findIndex((item) => item.id === row.id) === index)
+      .filter((row) => !handledIds.has(row.id));
+  const pool = state.recTab === "feedback"
+    ? feedbackPool
+    : state.recTab === "work" ? dash.work || [] : dash.personal || [];
   let items = pool.filter(matchQuery);
   if (state.recFilter === "high") items = items.filter((row) => Number(row.score || 0) >= 85);
   if (state.recFilter === "paper") items = items.filter((row) => sourceKind(row) === "paper");
@@ -498,13 +517,14 @@ function pageRecommend() {
   return `
     <div class="page-head">
       <div>
-        <h1>为你推荐</h1>
-        <p>基于你的兴趣、当前项目、目标和行为，为你筛选真正值得关注的内容。</p>
+        <h1>${state.recTab === "feedback" ? "待处理反馈" : "为你推荐"}</h1>
+        <p>${state.recTab === "feedback" ? "告诉 Agent 哪些内容有用、值得收藏或不再需要，让后续推荐更准确。" : "基于你的兴趣、当前项目、目标和行为，为你筛选真正值得关注的内容。"}</p>
       </div>
     </div>
     <div class="tabs">
       <button class="tab${state.recTab === "work" ? " is-on" : ""}" data-rectab="work" type="button">工作推荐</button>
       <button class="tab${state.recTab === "personal" ? " is-on" : ""}" data-rectab="personal" type="button">个人推荐</button>
+      <button class="tab${state.recTab === "feedback" ? " is-on" : ""}" data-rectab="feedback" type="button">待处理反馈</button>
     </div>
     <div class="chips" style="margin:12px 0">
       ${[["all","全部"],["high","高相关"],["paper","论文"],["github","GitHub"],["blog","Blog"],["product","产品动态"],["news","新闻"]].map(([id,label]) => `<button class="chip${state.recFilter===id?" is-on":""}" data-filter="${id}" type="button">${label}</button>`).join("")}
@@ -514,7 +534,7 @@ function pageRecommend() {
       </select>
     </div>
     <div class="layout">
-      <div class="stack">${items.length ? items.map(recCard).join("") : emptyFeed()}</div>
+      <div class="stack">${items.length ? items.map(recCard).join("") : (state.recTab === "feedback" ? '<div class="empty">推荐反馈已经处理完了。新的推荐出现后会显示在这里。</div>' : emptyFeed())}</div>
       <aside class="stack">
         <section class="card">
           <h3>推荐偏好</h3>
@@ -624,6 +644,44 @@ function pageFollows() {
     </div>`;
 }
 
+function localDateKey(value) {
+  if (!value) return "";
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function shiftDateKey(key, days) {
+  const date = new Date(`${key || localDateKey(new Date())}T12:00:00`);
+  date.setDate(date.getDate() + days);
+  return localDateKey(date);
+}
+
+function workWeek(key) {
+  const anchor = new Date(`${key || localDateKey(new Date())}T12:00:00`);
+  const mondayOffset = (anchor.getDay() + 6) % 7;
+  anchor.setDate(anchor.getDate() - mondayOffset);
+  return Array.from({ length: 7 }, (_, index) => shiftDateKey(localDateKey(anchor), index));
+}
+
+function localDateTimeInput(value) {
+  if (!value) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return `${value}T18:00`;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 16);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
+function storedDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toISOString();
+}
+
 function pageWork() {
   const desk = workDesk();
   const tasks = desk.tasks || [];
@@ -637,36 +695,73 @@ function pageWork() {
   }
   const pri = { urgent: "紧急", high: "高", medium: "中", low: "低" };
   const st = { todo: "待办", in_progress: "进行中", blocked: "阻塞", done: "完成", cancelled: "取消" };
+  const source = { conversation: "对话收集", manual: "手动创建", seed: "初始化", system: "系统" };
   const rtype = { deadline: "截止", progress: "进度", morning: "晨间", risk: "风险", manual: "约定" };
   const rst = { pending: "待发送", sent: "已发送", cancelled: "已取消", skipped: "已跳过" };
-  const card = (task) => {
+  const today = localDateKey(new Date());
+  const selected = state.workDate || today;
+  const week = workWeek(selected);
+  const taskDate = (task) => localDateKey(task.scheduled_at || task.deadline);
+  const datedTasks = roots.filter((task) => taskDate(task) === selected);
+  const unscheduled = roots.filter((task) => !taskDate(task) && !["done", "cancelled"].includes(task.status));
+  const overdue = roots.filter((task) => task.deadline && localDateKey(task.deadline) < today && !["done", "cancelled"].includes(task.status));
+  const timeLabel = (task) => {
+    if (!task.scheduled_at) return "全天";
+    return new Date(task.scheduled_at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+  };
+  const taskRow = (task, compact = false) => {
     const kids = childrenOf[task.id] || [];
-    return `<article class="task-card">
-      <div class="item-top"><b>${escapeHtml(task.title || "")}</b><span class="tag ${task.priority === "high" || task.priority === "urgent" ? "orange" : "gray"}">${pri[task.priority] || "中"}</span></div>
-      <p class="tiny">${escapeHtml(task.project || "当前项目")} · ${escapeHtml(task.deadline ? "截止 " + task.deadline.slice(0, 10) : "无截止日期")} · ${escapeHtml(st[task.status] || task.status)} · ${escapeHtml(task.source_type || "manual")}</p>
+    return `<article class="work-task${task.status === "done" ? " is-done" : ""}">
+      <div class="work-task-main">
+        <div class="item-top"><b>${escapeHtml(task.title || "")}</b><span class="tag ${task.priority === "high" || task.priority === "urgent" ? "orange" : "gray"}">${pri[task.priority] || "中"}</span></div>
+        ${!compact && task.description ? `<p class="work-task-desc">${escapeHtml(task.description)}</p>` : ""}
+        <p class="tiny">${escapeHtml(task.project || "未关联项目")} · ${escapeHtml(st[task.status] || task.status)} · ${escapeHtml(source[task.source_type] || task.source_type || "手动创建")}${task.deadline ? ` · 截止 ${escapeHtml(new Date(task.deadline).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }))}` : ""}</p>
+        ${!compact && kids.length ? `<ul class="task-kids">${kids.map((child) => `<li>${escapeHtml(child.title)} · ${escapeHtml(st[child.status] || "")}</li>`).join("")}</ul>` : ""}
+      </div>
       <div class="task-actions">
         ${task.status !== "done" && task.status !== "cancelled" ? `<button class="btn-ghost" type="button" data-task-id="${escapeHtml(task.id)}" data-task-act="start">开始</button>` : ""}
         ${task.status !== "done" && task.status !== "cancelled" ? `<button class="btn-ghost" type="button" data-task-id="${escapeHtml(task.id)}" data-task-act="done">完成</button>` : ""}
-        <button class="btn-ghost" type="button" data-task-id="${escapeHtml(task.id)}" data-task-act="breakdown">拆解</button>
+        ${!compact ? `<button class="btn-ghost" type="button" data-task-id="${escapeHtml(task.id)}" data-task-act="breakdown">拆解</button>` : ""}
+        <button class="btn-ghost" type="button" data-task-edit="${escapeHtml(task.id)}">编辑</button>
       </div>
-      ${kids.length ? `<ul class="task-kids">${kids.map((child) => `<li>${escapeHtml(child.title)} · ${escapeHtml(st[child.status] || "")}</li>`).join("")}</ul>` : ""}
     </article>`;
   };
+  const orderedForDay = [...datedTasks].sort((a, b) => String(a.scheduled_at || "9999").localeCompare(String(b.scheduled_at || "9999")));
+  const visibleTasks = state.workView === "all"
+    ? [...roots].sort((a, b) => String(a.scheduled_at || a.deadline || "9999").localeCompare(String(b.scheduled_at || b.deadline || "9999")))
+    : orderedForDay;
+  const selectedDate = new Date(`${selected}T12:00:00`);
+  const selectedTitle = selected === today ? "今日工作" : selectedDate.toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "long" });
   return `
     <div class="page-head">
       <div>
         <h1>我的工作</h1>
-        <p>对话里说出事项，我会记成待办，并结合项目进度主动提醒。</p>
+        <p>对话自动收集与手动安排使用同一份工作记忆，按时间推进并主动提醒。</p>
       </div>
+      <div class="actions"><button class="btn" id="addWorkTaskBtn" type="button">新建任务</button></div>
     </div>
-    <div class="layout">
-      <section class="stack">
-        <div class="card">
-          <div class="page-head" style="margin:0 0 12px"><h2 style="margin:0">任务</h2><span class="tiny">${roots.filter((row) => row.status !== "done").length} 件进行中</span></div>
-          ${roots.length ? roots.map((task) => card(task)).join("") : '<p class="tiny">还没有任务。去对话页说「周五前把 PPT 做完，提醒我。」</p>'}
-        </div>
+    <section class="work-calendar">
+      <div class="work-calendar-head">
+        <div class="actions"><button class="icon-btn" type="button" data-work-shift="-7" aria-label="上一周">‹</button><button class="btn-ghost" id="workTodayBtn" type="button">今天</button><button class="icon-btn" type="button" data-work-shift="7" aria-label="下一周">›</button></div>
+        <b>${week[0].slice(0, 7).replace("-", " 年 ")} 月</b>
+        <div class="segmented"><button type="button" data-work-view="day" class="${state.workView === "day" ? "is-on" : ""}">日程</button><button type="button" data-work-view="all" class="${state.workView === "all" ? "is-on" : ""}">全部</button></div>
+      </div>
+      <div class="work-week">${week.map((key) => {
+        const day = new Date(`${key}T12:00:00`);
+        const count = roots.filter((task) => taskDate(task) === key && !["cancelled"].includes(task.status)).length;
+        return `<button type="button" data-work-date="${key}" class="work-day${key === selected ? " is-on" : ""}${key === today ? " is-today" : ""}"><span>${day.toLocaleDateString("zh-CN", { weekday: "short" })}</span><b>${day.getDate()}</b><i>${count || ""}</i></button>`;
+      }).join("")}</div>
+    </section>
+    <div class="work-layout">
+      <section class="work-surface">
+        <div class="work-section-head"><div><h2>${state.workView === "all" ? "全部任务" : selectedTitle}</h2><p>${state.workView === "all" ? `${roots.length} 项任务` : `${visibleTasks.length} 项安排`}</p></div>${overdue.length ? `<span class="work-risk">${overdue.length} 项已逾期</span>` : ""}</div>
+        ${visibleTasks.length ? `<div class="work-timeline">${visibleTasks.map((task) => `<div class="work-slot"><time>${state.workView === "all" ? (taskDate(task) || "未排期") : timeLabel(task)}</time>${taskRow(task)}</div>`).join("")}</div>` : `<div class="empty"><b>${state.workView === "all" ? "还没有任务" : "这一天还没有安排"}</b><p>可以新建任务，也可以在秘书对话里直接说出要做的事。</p><button class="btn-ghost" type="button" data-task-new>添加一项工作</button></div>`}
       </section>
       <aside class="stack">
+        <section class="card work-unscheduled">
+          <div class="item-top"><h3>未排期</h3><span class="tiny">${unscheduled.length}</span></div>
+          ${unscheduled.length ? unscheduled.slice(0, 5).map((task) => taskRow(task, true)).join("") : '<p class="tiny">所有进行中的任务都已有时间安排。</p>'}
+        </section>
         <section class="card">
           <h3>提醒</h3>
           ${reminders.length ? reminders.slice(0, 6).map((row) => `<article class="remind-item"><div class="item-top"><b>${escapeHtml(rtype[row.reminder_type] || "提醒")}</b><span class="tag ${row.status === "sent" ? "green" : "gray"}">${escapeHtml(rst[row.status] || row.status)}</span></div><p class="tiny">${escapeHtml((row.generated_content || row.trigger_at || "").slice(0, 120))}</p></article>`).join("") : '<p class="tiny">有截止日期的任务会在 24 小时和 3 小时前结合进度提醒你。</p>'}
@@ -681,7 +776,34 @@ function pageWork() {
           <a class="btn-ghost" href="#/goals">打开目标管理</a>
         </section>
       </aside>
-    </div>`;
+    </div>
+    ${taskEditor(tasks)}`;
+}
+
+function taskEditor(tasks) {
+  if (!state.taskEditorOpen) return "";
+  const task = (tasks || []).find((row) => row.id === state.editingTaskId) || {};
+  const pendingProject = state.pendingTaskProject || {};
+  const duration = String(task.estimated_duration || "").match(/\d+/)?.[0] || "";
+  return `<div class="task-editor-backdrop" data-editor-backdrop>
+    <aside class="task-editor" role="dialog" aria-modal="true" aria-labelledby="taskEditorTitle">
+      <div class="task-editor-head"><div><span class="tiny">${task.id ? "修改工作安排" : "手动添加"}</span><h2 id="taskEditorTitle">${task.id ? "编辑任务" : "新建任务"}</h2></div><button class="icon-btn" id="taskEditorClose" type="button" aria-label="关闭">×</button></div>
+      <form id="taskEditorForm">
+        <div class="field"><label for="workTaskTitle">任务名称</label><input id="workTaskTitle" maxlength="160" required value="${escapeHtml(task.title || "")}" placeholder="例如：完成项目汇报初稿" /></div>
+        <div class="field"><label for="workTaskDescription">补充说明</label><textarea id="workTaskDescription" rows="3" maxlength="800" placeholder="成果要求、相关材料或注意事项">${escapeHtml(task.description || "")}</textarea></div>
+        <div class="form-grid">
+          <div class="field"><label for="workTaskSchedule">安排时间</label><input id="workTaskSchedule" type="datetime-local" value="${escapeHtml(localDateTimeInput(task.scheduled_at || (task.id ? "" : `${state.workDate}T09:00`)))}" /></div>
+          <div class="field"><label for="workTaskDeadline">截止时间</label><input id="workTaskDeadline" type="datetime-local" value="${escapeHtml(localDateTimeInput(task.deadline || ""))}" /></div>
+          <div class="field"><label for="workTaskPriority">优先级</label><select id="workTaskPriority">${[["low","低"],["medium","中"],["high","高"],["urgent","紧急"]].map(([value,label]) => `<option value="${value}"${(task.priority || "medium") === value ? " selected" : ""}>${label}</option>`).join("")}</select></div>
+          <div class="field"><label for="workTaskStatus">状态</label><select id="workTaskStatus">${[["todo","待办"],["in_progress","进行中"],["blocked","阻塞"],["done","完成"],["cancelled","取消"]].map(([value,label]) => `<option value="${value}"${(task.status || "todo") === value ? " selected" : ""}>${label}</option>`).join("")}</select></div>
+          <div class="field"><label for="workTaskProject">所属项目</label><input id="workTaskProject" maxlength="100" value="${escapeHtml(task.project || pendingProject.name || "")}" placeholder="可选" /><input id="workTaskProjectId" type="hidden" value="${escapeHtml(task.project_id || pendingProject.id || "")}" /></div>
+          <div class="field"><label for="workTaskDuration">预计时长（分钟）</label><input id="workTaskDuration" type="number" min="0" step="15" value="${escapeHtml(duration)}" placeholder="60" /></div>
+        </div>
+        ${task.id ? `<p class="editor-origin">来源：${escapeHtml(task.source_type === "conversation" ? "秘书对话自动收集" : task.source_type === "manual" ? "用户手动创建" : task.source_type || "未知")}</p>` : ""}
+        <div class="task-editor-actions"><button class="btn-ghost" id="taskEditorCancel" type="button">取消</button><button class="btn" type="submit">${task.id ? "保存修改" : "创建任务"}</button></div>
+      </form>
+    </aside>
+  </div>`;
 }
 
 function reportDayCard(day, reports) {
@@ -793,6 +915,9 @@ function pageReports() {
 
 function pageProjects() {
   const tracker = state.dash.tracker || {};
+  const pack = state.dash.project_trackers || {};
+  const projects = pack.items || (tracker.project ? [tracker] : []);
+  const storedProjects = (pack.projects || []).map((meta) => projects.find((row) => row.project_id === meta.project_id) || meta);
   const progress = Number(tracker.estimated_progress || 0);
   const done = tracker.completed || [];
   const doing = tracker.in_progress || [];
@@ -801,61 +926,91 @@ function pageProjects() {
   const goals = tracker.goals || [];
   const knowledge = tracker.knowledge || [];
   const events = tracker.events || [];
+  const acceptance = tracker.acceptance_criteria || [];
+  const milestones = tracker.milestones || [];
+  const statusLabels = { planning: "准备中", active: "进行中", paused: "已暂停", done: "已完成" };
   return `
+    <div class="project-switcher">
+      <div class="project-tabs">${storedProjects.map((row) => `<button type="button" data-project-select="${escapeHtml(row.project_id || "")}" class="project-tab${row.project_id === tracker.project_id ? " is-on" : ""}"><b>${escapeHtml(row.project || "未命名项目")}</b><span>${escapeHtml(row.stage || statusLabels[row.status_code] || statusLabels[row.status] || row.status || "")}</span></button>`).join("")}</div>
+      <button class="btn-ghost" id="newProjectBtn" type="button">新建项目</button>
+    </div>
     <div class="page-head">
       <div>
         <h1>${escapeHtml(tracker.project || "当前项目")}</h1>
-        <p>进度由任务完成情况、目标进度和工作事件估算，不是手填精确值。</p>
+        <p>${escapeHtml(tracker.summary || "持续记住项目目标，感知任务与风险变化，并推动下一步行动。")}</p>
       </div>
-      <a class="btn-ghost" href="#/work">打开待办</a>
+      <div class="actions"><button class="btn-ghost" id="editProjectBtn" type="button">编辑项目</button><button class="btn" id="addProjectTaskBtn" type="button">添加项目任务</button></div>
     </div>
     <div class="stats">
       ${stat("状态", tracker.status || "进行中", escapeHtml(tracker.stage || "当前阶段"))}
-      ${stat("估算进度", progress + "%", tracker.progress_basis || "tasks+goals+events")}
-      ${stat("进行中", (tracker.counts || {}).open || doing.length, "根任务")}
-      ${stat("已完成", (tracker.counts || {}).done || done.length, "根任务")}
+      ${stat("综合进度", progress + "%", "任务 + 节点 + 工作记录")}
+      ${stat("验收完成", (tracker.acceptance_progress || 0) + "%", `${acceptance.filter((row) => row.done).length}/${acceptance.length || 0} 项`)}
+      ${stat("里程碑", (tracker.milestone_progress || 0) + "%", `${milestones.filter((row) => row.status === "done").length}/${milestones.length || 0} 个`)}
     </div>
-    <div class="layout">
-      <section class="stack">
-        <div class="card">
-          <h2>整体进度</h2>
-          <div class="barline"><span style="width:${progress}%"></span></div>
-          <p class="tiny">约 ${progress}% · 估算</p>
-          ${tracker.target ? `<p>目标：${escapeHtml(tracker.target)}</p>` : ""}
-        </div>
-        <div class="card">
-          <h2>已完成</h2>
-          ${done.length ? `<ul class="track-list">${done.map((row) => `<li>✓ ${escapeHtml(row.title || "")}</li>`).join("")}</ul>` : '<p class="tiny">还没有标记完成的任务。</p>'}
-        </div>
-        <div class="card">
-          <h2>进行中</h2>
-          ${doing.length ? `<ul class="track-list">${doing.map((row) => `<li>• ${escapeHtml(row.title || "")}</li>`).join("")}</ul>` : '<p class="tiny">没有进行中的任务。</p>'}
-        </div>
-        <div class="card">
-          <h2>风险</h2>
-          ${risks.length ? `<ul class="track-list">${risks.map((row) => `<li>! ${escapeHtml(row)}</li>`).join("")}</ul>` : '<p class="tiny">暂无记录中的风险。</p>'}
-        </div>
-        <div class="card">
-          <h2>下一步建议</h2>
-          ${steps.length ? `<ol class="work-todo">${steps.map((row) => `<li>${escapeHtml(row)}</li>`).join("")}</ol>` : '<p class="tiny">先确认当前最紧急的待办。</p>'}
-        </div>
-      </section>
-      <aside class="stack">
-        <section class="card">
-          <h3>目标</h3>
-          ${goals.length ? goals.slice(0, 4).map((goal) => `<p class="tiny">${escapeHtml(goal.title || "")} · ${escapeHtml(String(goal.progress || 0))}%</p>`).join("") : '<p class="tiny">还没有目标。</p>'}
-          <a class="btn-ghost" href="#/goals">目标管理</a>
+    <div class="project-cycle">
+      <section><span>记忆</span><b>${acceptance.length + milestones.length} 项项目约定</b><p>${escapeHtml(tracker.objective || tracker.target || "等待补充项目目标")}</p></section>
+      <section><span>感知</span><b>${events.length + knowledge.length} 条动态信号</b><p>${risks.length ? `${risks.length} 项风险需要关注` : "当前未发现明确风险"}</p></section>
+      <section><span>行动</span><b>${steps.length} 个下一步建议</b><p>${doing.length} 项工作正在推进</p></section>
+    </div>
+    <div class="project-workspace">
+      <main class="project-main">
+        <section class="project-band">
+          <div class="project-band-head"><div><span class="project-kicker">Remember · 项目记忆</span><h2>目标与验收</h2></div><span class="tiny">${escapeHtml(tracker.start_date || "未设开始")} 至 ${escapeHtml(tracker.target_date || "未设完成时间")}</span></div>
+          <div class="project-objective"><span>项目目标</span><p>${escapeHtml(tracker.objective || tracker.target || "还没有明确项目目标。")}</p></div>
+          <div class="project-columns">
+            <div><h3>验收标准</h3>${acceptance.length ? `<div class="project-checklist">${acceptance.map((row) => `<button type="button" data-project-accept="${escapeHtml(row.id)}" class="${row.done ? "is-done" : ""}"><i>${row.done ? "✓" : ""}</i><span>${escapeHtml(row.text)}</span></button>`).join("")}</div>` : '<p class="tiny">编辑项目并写下“做到什么才算完成”。</p>'}</div>
+            <div><h3>时间节点</h3>${milestones.length ? `<div class="milestone-list">${milestones.map((row) => `<button type="button" data-project-milestone="${escapeHtml(row.id)}" class="${row.status === "done" ? "is-done" : ""}"><i></i><span><b>${escapeHtml(row.title)}</b><small>${escapeHtml(row.due_date || "未设日期")} · ${row.status === "done" ? "已完成" : row.status === "in_progress" ? "进行中" : "待推进"}</small></span></button>`).join("")}</div>` : '<p class="tiny">还没有时间节点。</p>'}</div>
+          </div>
         </section>
-        <section class="card">
-          <h3>知识</h3>
-          ${knowledge.length ? knowledge.map((row) => `<p class="tiny">${escapeHtml(row.title || "")}</p>`).join("") : '<p class="tiny">还没有和该项目匹配的知识条目。</p>'}
+        <section class="project-band">
+          <div class="project-band-head"><div><span class="project-kicker">Observe · 动态感知</span><h2>进展与风险</h2></div><span class="tiny">来自任务、对话、知识与工作事件</span></div>
+          <div class="project-progress"><div><b>${progress}%</b><span>综合估算进度</span></div><div class="barline"><span style="width:${progress}%"></span></div></div>
+          <div class="project-columns">
+            <div><h3>正在推进</h3>${doing.length ? `<ul class="track-list">${doing.map((row) => `<li>${escapeHtml(row.title || "")}</li>`).join("")}</ul>` : '<p class="tiny">没有进行中的任务。</p>'}${done.length ? `<p class="tiny">已完成 ${done.length} 项</p>` : ""}</div>
+            <div><h3>风险信号</h3>${risks.length ? `<ul class="risk-list">${risks.map((row) => `<li>${escapeHtml(row)}</li>`).join("")}</ul>` : '<p class="tiny">当前没有检测到明确风险。</p>'}</div>
+          </div>
         </section>
-        <section class="card">
-          <h3>最近事件</h3>
-          ${events.length ? events.slice(0, 6).map((row) => `<p class="tiny">${escapeHtml(row.title || row.event_type || "")}</p>`).join("") : '<p class="tiny">还没有工作事件。</p>'}
+        <section class="project-band project-action-band">
+          <div class="project-band-head"><div><span class="project-kicker">Act · 主动行动</span><h2>下一步</h2></div><button class="btn-ghost" id="addProjectTaskBtn2" type="button">添加任务</button></div>
+          ${steps.length ? `<ol class="project-next">${steps.map((row, index) => `<li><span>${index + 1}</span><p>${escapeHtml(row)}</p></li>`).join("")}</ol>` : '<p class="tiny">补充里程碑或添加任务后，Agent 会给出下一步建议。</p>'}
         </section>
+      </main>
+      <aside class="project-aside">
+        <section><h3>项目范围</h3><p>${escapeHtml(tracker.summary || "尚未补充项目说明。")}</p><div class="tags">${(tracker.topics || []).map((topic) => `<span class="tag">${escapeHtml(topic)}</span>`).join("")}</div></section>
+        <section><h3>相关知识</h3>${knowledge.length ? knowledge.slice(0, 5).map((row) => `<p class="tiny">${escapeHtml(row.title || "")}</p>`).join("") : '<p class="tiny">还没有匹配到项目知识。</p>'}</section>
+        <section><h3>最近感知</h3>${events.length ? events.slice(0, 6).map((row) => `<p class="tiny">${escapeHtml(row.title || row.event_type || "")}</p>`).join("") : '<p class="tiny">项目还没有工作事件。</p>'}</section>
+        <section><h3>关联目标</h3>${goals.length ? goals.slice(0, 4).map((goal) => `<p class="tiny">${escapeHtml(goal.title || "")} · ${escapeHtml(String(goal.progress || 0))}%</p>`).join("") : '<p class="tiny">还没有关联目标。</p>'}</section>
       </aside>
-    </div>`;
+    </div>
+    ${projectEditor(projects)}`;
+}
+
+function projectEditor(projects) {
+  if (!state.projectEditorOpen) return "";
+  const project = (projects || []).find((row) => row.project_id === state.editingProjectId) || {};
+  const acceptance = (project.acceptance_criteria || []).map((row) => `${row.done ? "[x]" : "[ ]"} ${row.text || row.title || ""}`).join("\n");
+  const milestones = (project.milestones || []).map((row) => `${row.title || ""} | ${row.due_date || ""} | ${row.status === "done" ? "完成" : row.status === "in_progress" ? "进行中" : "待办"}`).join("\n");
+  return `<div class="task-editor-backdrop">
+    <aside class="task-editor project-editor" role="dialog" aria-modal="true" aria-labelledby="projectEditorTitle">
+      <div class="task-editor-head"><div><span class="tiny">项目长期记忆</span><h2 id="projectEditorTitle">${project.project_id ? "编辑项目" : "新建项目"}</h2></div><button class="icon-btn" id="projectEditorClose" type="button" aria-label="关闭">×</button></div>
+      <form id="projectEditorForm">
+        <div class="field"><label for="projectName">项目名称</label><input id="projectName" maxlength="160" required value="${escapeHtml(project.project || "")}" placeholder="例如：Personal Agent 2.0" /></div>
+        <div class="field"><label for="projectSummary">项目内容</label><textarea id="projectSummary" rows="3" maxlength="1200" placeholder="项目背景、范围和要解决的问题">${escapeHtml(project.summary || "")}</textarea></div>
+        <div class="field"><label for="projectObjective">项目目标</label><textarea id="projectObjective" rows="2" maxlength="600" placeholder="最终希望交付什么结果">${escapeHtml(project.objective || "")}</textarea></div>
+        <div class="form-grid">
+          <div class="field"><label for="projectStage">当前阶段</label><input id="projectStage" maxlength="120" value="${escapeHtml(project.stage || "")}" placeholder="调研 / 开发 / 验收" /></div>
+          <div class="field"><label for="projectStatus">状态</label><select id="projectStatus">${[["planning","准备中"],["active","进行中"],["paused","已暂停"],["done","已完成"]].map(([value,label]) => `<option value="${value}"${(project.status_code || project.status || "active") === value ? " selected" : ""}>${label}</option>`).join("")}</select></div>
+          <div class="field"><label for="projectStartDate">开始日期</label><input id="projectStartDate" type="date" value="${escapeHtml(project.start_date || "")}" /></div>
+          <div class="field"><label for="projectTargetDate">计划完成</label><input id="projectTargetDate" type="date" value="${escapeHtml(project.target_date || "")}" /></div>
+          <div class="field"><label for="projectPriority">优先级</label><select id="projectPriority">${[["low","低"],["medium","中"],["high","高"],["urgent","紧急"]].map(([value,label]) => `<option value="${value}"${(project.priority || "medium") === value ? " selected" : ""}>${label}</option>`).join("")}</select></div>
+          <div class="field"><label for="projectTopics">关注主题</label><input id="projectTopics" value="${escapeHtml((project.topics || []).join("、"))}" placeholder="Agent、Memory、评测" /></div>
+        </div>
+        <div class="field"><label for="projectAcceptance">验收标准（每行一项，可用 [x] 标记完成）</label><textarea id="projectAcceptance" rows="5" placeholder="[ ] 核心流程可以稳定运行&#10;[ ] 完成用户验收">${escapeHtml(acceptance)}</textarea></div>
+        <div class="field"><label for="projectMilestones">时间节点（名称 | 日期 | 状态）</label><textarea id="projectMilestones" rows="5" placeholder="完成方案评审 | 2026-09-10 | 待办&#10;上线试运行 | 2026-09-30 | 待办">${escapeHtml(milestones)}</textarea></div>
+        <div class="task-editor-actions"><button class="btn-ghost" id="projectEditorCancel" type="button">取消</button><button class="btn" type="submit">${project.project_id ? "保存项目" : "创建项目"}</button></div>
+      </form>
+    </aside>
+  </div>`;
 }
 
 function pageGoals() {
@@ -1348,21 +1503,38 @@ const PAGES = {
 };
 
 function currentRoute() {
-  const hash = location.hash.replace("#", "") || "/";
-  if (hash === "/settings") return "/settings/push";
-  if (hash === "/toolbox") return "/skills";
-  return PAGES[hash] ? hash : "/";
+  const path = hashLocation().path;
+  if (path === "/settings") return "/settings/push";
+  if (path === "/toolbox") return "/skills";
+  if (path === "/feedback") return "/recommend";
+  return PAGES[path] ? path : "/";
+}
+
+function hashLocation() {
+  const raw = location.hash.replace(/^#/, "") || "/";
+  const queryAt = raw.indexOf("?");
+  const path = queryAt >= 0 ? raw.slice(0, queryAt) : raw;
+  const query = queryAt >= 0 ? raw.slice(queryAt + 1) : "";
+  return { path: path || "/", params: new URLSearchParams(query) };
+}
+
+function syncRouteState() {
+  const { path, params } = hashLocation();
+  const tab = path === "/feedback" ? "feedback" : params.get("tab");
+  if (["work", "personal", "feedback"].includes(tab)) state.recTab = tab;
 }
 
 function render() {
-  if ((location.hash.replace("#", "") || "/") === "/settings") {
+  const { path } = hashLocation();
+  if (path === "/settings") {
     location.hash = "#/settings/push";
     return;
   }
-  if ((location.hash.replace("#", "") || "/") === "/toolbox") {
+  if (path === "/toolbox") {
     location.hash = "#/skills";
     return;
   }
+  syncRouteState();
   state.route = currentRoute();
   renderChrome();
   if (!state.dash) {
@@ -1452,7 +1624,7 @@ async function refreshFeeds(btn) {
 }
 
 document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-act],[data-open],[data-rectab],[data-filter],[data-cat],[data-card],[data-topic],[data-example],[data-toggle],[data-move],[data-followkind],[data-chat-session],[data-chat-example],[data-task-act],[data-report-tab],[data-skill],[data-llm-preset],[data-copy-report],[data-export-report],[data-regen-report],[data-jump-day],#newChatBtn,#saveConversationProfileBtn,#refreshBtn,#refreshBtn2,#followBtn,#addGoalBtn,#savePrefBtn,#savePushBtn,#pushNowBtn,#briefBtn,#noticeBtn,#saveProfileBtn,#exportBtn,#addProductBtn,#addSourceBtn,#addFollowGoalBtn,#logoutBtn,#savePassBtn,#saveFeishuBtn,#llmEnabledBtn,#saveLlmBtn,#testLlmBtn,#generateReportBtn,#copyReportBtn,#exportReportBtn,#saveReportBtn");
+  const t = event.target.closest("[data-act],[data-open],[data-rectab],[data-filter],[data-cat],[data-card],[data-topic],[data-example],[data-toggle],[data-move],[data-followkind],[data-chat-session],[data-chat-example],[data-task-act],[data-task-edit],[data-task-new],[data-work-date],[data-work-shift],[data-work-view],[data-project-select],[data-project-accept],[data-project-milestone],[data-report-tab],[data-skill],[data-llm-preset],[data-copy-report],[data-export-report],[data-regen-report],[data-jump-day],#newChatBtn,#saveConversationProfileBtn,#refreshBtn,#refreshBtn2,#followBtn,#addGoalBtn,#savePrefBtn,#savePushBtn,#pushNowBtn,#briefBtn,#noticeBtn,#saveProfileBtn,#exportBtn,#addProductBtn,#addSourceBtn,#addFollowGoalBtn,#logoutBtn,#savePassBtn,#saveFeishuBtn,#llmEnabledBtn,#saveLlmBtn,#testLlmBtn,#generateReportBtn,#copyReportBtn,#exportReportBtn,#saveReportBtn,#addWorkTaskBtn,#workTodayBtn,#taskEditorClose,#taskEditorCancel,#newProjectBtn,#editProjectBtn,#addProjectTaskBtn,#addProjectTaskBtn2,#projectEditorClose,#projectEditorCancel");
   if (!t) return;
   if (t.dataset.chatSession) {
     state.activeSessionId = t.dataset.chatSession;
@@ -1584,6 +1756,100 @@ document.addEventListener("click", async (event) => {
     showAuth();
     setAuthMode(false);
     toast("已退出");
+    return;
+  }
+  if (t.id === "newProjectBtn") {
+    state.editingProjectId = null;
+    state.projectEditorOpen = true;
+    render();
+    requestAnimationFrame(() => $("projectName")?.focus());
+    return;
+  }
+  if (t.id === "editProjectBtn") {
+    state.editingProjectId = (state.dash.tracker || {}).project_id || null;
+    state.projectEditorOpen = true;
+    render();
+    requestAnimationFrame(() => $("projectName")?.focus());
+    return;
+  }
+  if (t.id === "projectEditorClose" || t.id === "projectEditorCancel") {
+    state.projectEditorOpen = false;
+    state.editingProjectId = null;
+    render();
+    return;
+  }
+  if (t.dataset.projectSelect) {
+    await api(`/api/projects/${encodeURIComponent(t.dataset.projectSelect)}/activate`, { method: "POST", body: "{}" });
+    await load();
+    toast("已切换当前项目，后续对话和推荐会使用这份项目记忆。");
+    return;
+  }
+  if (t.id === "addProjectTaskBtn" || t.id === "addProjectTaskBtn2") {
+    const tracker = state.dash.tracker || {};
+    state.pendingTaskProject = { id: tracker.project_id || "", name: tracker.project || "" };
+    state.editingTaskId = null;
+    state.taskEditorOpen = true;
+    location.hash = "#/work";
+    return;
+  }
+  if (t.dataset.projectAccept) {
+    const tracker = state.dash.tracker || {};
+    const criteria = (tracker.acceptance_criteria || []).map((row) => ({ ...row, done: row.id === t.dataset.projectAccept ? !row.done : !!row.done }));
+    await api(`/api/projects/${encodeURIComponent(tracker.project_id)}`, { method: "PUT", body: JSON.stringify({ acceptance_criteria: criteria }) });
+    await load();
+    toast("验收状态已更新，项目记忆和进度已同步。");
+    return;
+  }
+  if (t.dataset.projectMilestone) {
+    const tracker = state.dash.tracker || {};
+    const milestones = (tracker.milestones || []).map((row) => ({ ...row, status: row.id === t.dataset.projectMilestone ? (row.status === "done" ? "pending" : "done") : row.status }));
+    await api(`/api/projects/${encodeURIComponent(tracker.project_id)}`, { method: "PUT", body: JSON.stringify({ milestones }) });
+    await load();
+    toast("时间节点已更新，风险和下一步建议会重新计算。");
+    return;
+  }
+  if (t.id === "addWorkTaskBtn" || t.dataset.taskNew !== undefined) {
+    state.pendingTaskProject = null;
+    state.editingTaskId = null;
+    state.taskEditorOpen = true;
+    render();
+    requestAnimationFrame(() => $("workTaskTitle")?.focus());
+    return;
+  }
+  if (t.dataset.taskEdit) {
+    state.editingTaskId = t.dataset.taskEdit;
+    state.taskEditorOpen = true;
+    render();
+    requestAnimationFrame(() => $("workTaskTitle")?.focus());
+    return;
+  }
+  if (t.id === "taskEditorClose" || t.id === "taskEditorCancel") {
+    state.taskEditorOpen = false;
+    state.editingTaskId = null;
+    state.pendingTaskProject = null;
+    render();
+    return;
+  }
+  if (t.dataset.workDate) {
+    state.workDate = t.dataset.workDate;
+    state.workView = "day";
+    render();
+    return;
+  }
+  if (t.dataset.workShift) {
+    state.workDate = shiftDateKey(state.workDate, Number(t.dataset.workShift));
+    render();
+    return;
+  }
+  if (t.id === "workTodayBtn") {
+    state.workDate = localDateKey(new Date());
+    state.workView = "day";
+    render();
+    return;
+  }
+  if (t.dataset.workView) {
+    state.workView = t.dataset.workView;
+    render();
     return;
   }
   if (t.dataset.taskAct && t.dataset.taskId) {
@@ -1817,6 +2083,85 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("submit", async (event) => {
+  if (event.target.id === "projectEditorForm") {
+    event.preventDefault();
+    const name = $("projectName")?.value.trim() || "";
+    if (!name) return;
+    const criteria = ($("projectAcceptance")?.value || "").split(/\r?\n/).map((line, index) => {
+      const text = line.replace(/^\s*\[(?:x|X| )\]\s*/, "").trim();
+      return text ? { id: `accept-${index + 1}`, text, done: /^\s*\[(?:x|X)\]/.test(line) } : null;
+    }).filter(Boolean);
+    const milestones = ($("projectMilestones")?.value || "").split(/\r?\n/).map((line, index) => {
+      const [title, dueDate, rawStatus] = line.split("|").map((part) => part.trim());
+      if (!title) return null;
+      const status = /完成/.test(rawStatus || "") ? "done" : /进行/.test(rawStatus || "") ? "in_progress" : "pending";
+      return { id: `milestone-${index + 1}`, title, due_date: dueDate || "", status };
+    }).filter(Boolean);
+    const payload = {
+      project: name,
+      summary: $("projectSummary")?.value.trim() || "",
+      objective: $("projectObjective")?.value.trim() || "",
+      stage: $("projectStage")?.value.trim() || "",
+      status: $("projectStatus")?.value || "active",
+      start_date: $("projectStartDate")?.value || "",
+      target_date: $("projectTargetDate")?.value || "",
+      priority: $("projectPriority")?.value || "medium",
+      topics: ($("projectTopics")?.value || "").split(/[,，、\n]+/).map((item) => item.trim()).filter(Boolean),
+      acceptance_criteria: criteria,
+      milestones,
+    };
+    try {
+      if (state.editingProjectId) {
+        await api(`/api/projects/${encodeURIComponent(state.editingProjectId)}`, { method: "PUT", body: JSON.stringify(payload) });
+        toast("项目记忆已更新，进度、风险和建议已重新计算。");
+      } else {
+        await api("/api/projects", { method: "POST", body: JSON.stringify(payload) });
+        toast("项目已创建，并设为当前项目。");
+      }
+      state.projectEditorOpen = false;
+      state.editingProjectId = null;
+      await load();
+    } catch (err) {
+      toast(err.message || "保存项目失败");
+    }
+    return;
+  }
+  if (event.target.id === "taskEditorForm") {
+    event.preventDefault();
+    const title = $("workTaskTitle")?.value.trim() || "";
+    if (!title) return;
+    const duration = $("workTaskDuration")?.value.trim() || "";
+    const scheduledAt = storedDateTime($("workTaskSchedule")?.value || "");
+    const payload = {
+      title,
+      description: $("workTaskDescription")?.value.trim() || "",
+      project: $("workTaskProject")?.value.trim() || "",
+      project_id: $("workTaskProjectId")?.value || "",
+      scheduled_at: scheduledAt,
+      deadline: storedDateTime($("workTaskDeadline")?.value || ""),
+      priority: $("workTaskPriority")?.value || "medium",
+      status: $("workTaskStatus")?.value || "todo",
+      estimated_duration: duration ? `${duration}m` : "",
+    };
+    try {
+      if (state.editingTaskId) {
+        await api(`/api/work/tasks/${encodeURIComponent(state.editingTaskId)}`, { method: "PUT", body: JSON.stringify(payload) });
+        toast("任务安排已更新，相关提醒也已重新同步。");
+      } else {
+        await api("/api/work/tasks", { method: "POST", body: JSON.stringify({ ...payload, source_type: "manual" }) });
+        toast("任务已加入工作日程。");
+      }
+      if (scheduledAt) state.workDate = localDateKey(scheduledAt);
+      state.workView = "day";
+      state.taskEditorOpen = false;
+      state.editingTaskId = null;
+      state.pendingTaskProject = null;
+      await load();
+    } catch (err) {
+      toast(err.message || "保存任务失败");
+    }
+    return;
+  }
   if (event.target.id !== "chatForm") return;
   event.preventDefault();
   const input = $("chatInput");
@@ -1867,6 +2212,7 @@ document.addEventListener("click", (event) => {
 });
 
 window.addEventListener("hashchange", async () => {
+  syncRouteState();
   state.route = currentRoute();
   if (state.route === "/chat") await loadChatState(true);
   render();
@@ -1894,5 +2240,6 @@ $("authForm")?.addEventListener("submit", async (event) => {
   }
 });
 
+syncRouteState();
 state.route = currentRoute();
 boot();

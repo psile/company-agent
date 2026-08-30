@@ -16,6 +16,7 @@ DEFAULT_CONVERSATION_PROFILE = {
     "technical_detail": "high",
     "proactive_level": "medium",
     "confirmation_policy": "important_actions",
+    "assistant_name": "",
     "updated_at": "",
 }
 
@@ -44,6 +45,8 @@ class ConversationProfile:
             value = str(payload.get(key) or "").strip()
             if value in choices:
                 profile[key] = value
+        if "assistant_name" in payload:
+            profile["assistant_name"] = str(payload.get("assistant_name") or "").strip()[:16]
         profile["updated_at"] = datetime.now(timezone.utc).isoformat()
         _write_json(self.path, profile)
         return profile

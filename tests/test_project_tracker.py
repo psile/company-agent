@@ -57,6 +57,38 @@ def test_bob_cannot_see_alice_tracker_via_list(tmp_path, monkeypatch):
     assert not any("World Model 数据集" in (row.get("title") or "") for item in alice_pack["items"] for row in item.get("open_tasks") or [])
 
 
+def test_projects_are_editable_active_memories_with_acceptance_and_milestones(tmp_path, monkeypatch):
+    svc = _svc(tmp_path, monkeypatch)
+    created = svc.create_project(
+        {
+            "project": "Agent Evaluation",
+            "summary": "建立个人秘书 Agent 的评测闭环",
+            "objective": "形成一套可重复运行的验收方案",
+            "stage": "方案设计",
+            "target_date": "2026-10-01",
+            "topics": ["Agent", "Evaluation"],
+            "acceptance_criteria": ["完成 20 条核心场景评测", "形成周度质量报告"],
+            "milestones": [{"title": "确定评测集", "due_date": "2026-09-10", "status": "pending"}],
+        },
+        user_id="alice",
+    )["project"]
+    assert created["project_id"]
+    assert created["acceptance_criteria"][0]["done"] is False
+    updated = svc.update_project(
+        created["project_id"],
+        {
+            "acceptance_criteria": [{"id": "accept-1", "text": "完成 20 条核心场景评测", "done": True}],
+            "milestones": [{"id": "milestone-1", "title": "确定评测集", "due_date": "2026-09-10", "status": "done"}],
+        },
+        user_id="alice",
+    )["tracker"]
+    assert updated["acceptance_progress"] == 100
+    assert updated["milestone_progress"] == 100
+    svc.activate_project(created["project_id"], user_id="alice")
+    assert svc.project_tracker("alice")["project"] == "Agent Evaluation"
+    assert all(row["project"] != "Agent Evaluation" for row in svc.list_project_trackers("bob")["items"])
+
+
 def test_chat_query_project_is_isolated(tmp_path, monkeypatch):
     svc = _svc(tmp_path, monkeypatch)
     alice = _chat(svc, "alice", "这个项目现在进展怎么样？")

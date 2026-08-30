@@ -210,6 +210,25 @@ def test_validate_app_config_checks_credentials_and_mobile(monkeypatch):
     assert out["recipient_ok"] is True
 
 
+def test_feishu_tenant_token_is_reused(monkeypatch):
+    from radar.feishu import _tenant_access_token, reset_token_cache_for_tests
+
+    reset_token_cache_for_tests()
+    calls = []
+
+    def fake_post(*_args, **_kwargs):
+        calls.append(1)
+        return {"ok": True, "data": {"tenant_access_token": "cached-token", "expire": 7200}}
+
+    monkeypatch.setattr("radar.feishu._post_json", fake_post)
+    first = _tenant_access_token("cli_cache_test", "secret")
+    second = _tenant_access_token("cli_cache_test", "secret")
+    assert first["tenant_access_token"] == "cached-token"
+    assert second["tenant_access_token"] == "cached-token"
+    assert second["cached"] is True
+    assert len(calls) == 1
+
+
 def test_dislike_lowers_topic(tmp_path, monkeypatch):
     monkeypatch.setenv("RADAR_LLM", "0")
     svc = RadarService(data_dir=tmp_path)
@@ -258,8 +277,14 @@ def test_dashboard_follow_and_feedback_note(tmp_path, monkeypatch):
         "item_type": "blog",
     }
     svc.memory.save_feeds([], [item], intel=[], for_you=[item])
+    pending = svc.dashboard()
+    assert pending["stats"]["pending_feedback"] == 1
+    assert [row["id"] for row in pending["pending_feedback"]] == ["dddddddddddd"]
     tracked = svc.track("dddddddddddd", "useful")
     assert "提高" in tracked["note"]
+    handled = svc.dashboard()
+    assert handled["stats"]["pending_feedback"] == 0
+    assert handled["pending_feedback"] == []
     collected = svc.track("dddddddddddd", "collect")
     assert "Agent Memory" in collected["note"]
     assert collected["card"]["category"] == "Agent Memory"

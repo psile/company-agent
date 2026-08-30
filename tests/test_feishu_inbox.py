@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from radar.feishu_inbox import (
@@ -100,6 +101,30 @@ def test_maps_seed_open_id_to_bob_and_replies(tmp_path, monkeypatch):
         chat_fn=lambda *_: {"reply": "不应再回"},
     )
     assert again["skipped"] == "duplicate"
+
+
+def test_slow_chat_sends_contextual_progress_before_final_reply(tmp_path, monkeypatch):
+    svc = _svc(tmp_path, monkeypatch)
+    monkeypatch.setenv("FEISHU_PROGRESS_DELAY", "0.01")
+    replies = []
+
+    def slow_chat(_svc, _uid, _text):
+        time.sleep(0.05)
+        return {"reply": "我把重点整理好了。", "intent": "generate_report", "session_id": "feishu"}
+
+    out = handle_incoming(
+        svc,
+        _p2p_event("帮我生成今天的工作总结", message_id="om_slow"),
+        send_reply=lambda **kwargs: replies.append(kwargs) or {"ok": True},
+        lookup_profile=lambda _oid: {},
+        chat_fn=slow_chat,
+    )
+
+    assert out["ok"] is True
+    assert out["progress"]["sent"] is True
+    assert "任务和进展" in replies[0]["text"]
+    assert replies[-1]["text"] == "我把重点整理好了。"
+    assert out["elapsed_ms"] >= 40
 
 
 def test_maps_receive_email_then_binds_open_id(tmp_path, monkeypatch):

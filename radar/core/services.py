@@ -26,6 +26,7 @@ class TaskService:
             "parent_task_id": data.get("parent_task_id", ""),
             "priority": data.get("priority", "medium"),
             "status": data.get("status", "todo"),
+            "scheduled_at": data.get("scheduled_at", ""),
             "deadline": data.get("deadline", ""),
             "estimated_duration": data.get("estimated_duration", ""),
             "source_type": data.get("source_type", "manual"),

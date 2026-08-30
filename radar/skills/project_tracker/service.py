@@ -41,8 +41,10 @@ def list_trackers(service: Any, user_id: str) -> dict[str, Any]:
     scope = service.for_user(uid)
     current_meta = dict(scope.user_memory.project() or {})
     current = build_snapshot(service, uid, current_meta)
-    seen = {norm(str(current_meta.get("project") or ""))}
-    items = [current]
+    explicit = list(scope.user_memory.projects() or [])
+    items = [build_snapshot(service, uid, row) for row in explicit]
+    items.sort(key=lambda row: 0 if row.get("project_id") == current.get("project_id") else 1)
+    seen = {norm(str(row.get("project") or "")) for row in explicit}
     for task in scope.work.tasks():
         name = str(task.get("project") or "").strip()
         if not name or norm(name) in seen or belongs_to_project(task, current_meta):
@@ -50,4 +52,4 @@ def list_trackers(service: Any, user_id: str) -> dict[str, Any]:
         seen.add(norm(name))
         extra = {"project": name, "stage": "", "topics": [], "priority": task.get("priority") or "medium", "project_id": task.get("project_id") or ""}
         items.append(build_snapshot(service, uid, extra))
-    return {"user_id": uid, "current": current, "items": items}
+    return {"user_id": uid, "current": current, "items": items, "projects": explicit}

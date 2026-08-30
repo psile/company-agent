@@ -214,6 +214,9 @@ def make_handler(service: RadarService):
         ),
     )
     add("GET", "/api/projects", "user", lambda h, uid, *_: h._json(200, service.list_project_trackers(uid)))
+    add("POST", "/api/projects", "user", lambda h, uid, _p, _q, body: h._json(200, service.create_project(body or {}, uid)))
+    add("PUT", "/api/projects/{project_id}", "user", lambda h, uid, params, _q, body: h._json(200, service.update_project(params["project_id"], body or {}, uid)))
+    add("POST", "/api/projects/{project_id}/activate", "user", lambda h, uid, params, _q, _body: h._json(200, service.activate_project(params["project_id"], uid)))
     add("GET", "/api/project/tracker", "user", lambda h, uid, *_: h._json(200, service.project_tracker(uid)))
     add("GET", "/api/work/tracker", "user", lambda h, uid, *_: h._json(200, service.project_tracker(uid)))
     add("GET", "/api/skills", "user", lambda h, uid, *_: h._json(200, {"items": service.list_office_skills()}))

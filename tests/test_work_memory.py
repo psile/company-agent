@@ -33,6 +33,24 @@ def test_alice_task_is_invisible_to_bob(tmp_path, monkeypatch):
     assert svc.for_user("bob").work.get_task(created["id"]) is None
 
 
+def test_manual_task_keeps_schedule_separate_from_deadline(tmp_path, monkeypatch):
+    svc = _svc(tmp_path, monkeypatch)
+    task = svc.create_task(
+        {
+            "title": "Prepare project review",
+            "scheduled_at": "2026-09-01T09:30:00+08:00",
+            "deadline": "2026-09-02T18:00:00+08:00",
+            "source_type": "manual",
+        },
+        user_id="alice",
+    )
+    assert task["scheduled_at"] == "2026-09-01T09:30:00+08:00"
+    assert task["deadline"] == "2026-09-02T18:00:00+08:00"
+    updated = svc.update_task(task["id"], {"scheduled_at": "2026-09-01T14:00:00+08:00"}, user_id="alice")
+    assert updated["scheduled_at"] == "2026-09-01T14:00:00+08:00"
+    assert updated["deadline"] == "2026-09-02T18:00:00+08:00"
+
+
 def test_work_events_and_notes_are_isolated(tmp_path, monkeypatch):
     svc = _svc(tmp_path, monkeypatch)
     note = svc.add_work_note({"content": "only alice should see this"}, user_id="alice")

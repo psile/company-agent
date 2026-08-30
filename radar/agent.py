@@ -169,6 +169,10 @@ class ConversationAgent:
         entities = routed.entities
         actions: list[dict[str, Any]] = []
         memory_updated = False
+        assistant_name = _assistant_name_from_message(message)
+        if assistant_name:
+            profile = self.service.conversation_profile(user_id).update({"assistant_name": assistant_name})
+            actions.append({"tool": "update_conversation_profile", "status": "success", "summary": f"称呼：{assistant_name}"})
 
         if intent == "create_watch":
             topics = entities.get("topics") or _extract_topics(message)
@@ -316,7 +320,11 @@ class ConversationAgent:
         recalled = public_hits(retrieve(scope, message, limit=6))
         context = _compact_chat_context(mem, goals, history, profile, message, recalled)
         generated = llm.chat_text(
-            "你是可持续对话的个人办公秘书。用中文，结论优先，2–4 句即可。"
+            "你是与用户长期相处的个人办公秘书，不是客服机器人。用自然、有分寸的中文交流。"
+            "先理解用户此刻真正想表达什么：有情绪时先真诚接住，再看是否需要帮忙；有任务时先确认结果，再给下一步。"
+            "避免套话和固定收尾，尤其不要反复说‘有什么需要随时说’‘很高兴为你服务’。"
+            "不要复述用户原话，不要夸张共情，不要每句都称呼用户。一般回复 2–4 句，结论优先。"
+            "上下文里的 assistant_name 是用户给你的称呼，存在时自然使用。"
             "用户没问目标或推荐时不要主动罗列进度。不要泄露工具 JSON。",
             json.dumps(context, ensure_ascii=False),
             timeout=25,
@@ -325,7 +333,7 @@ class ConversationAgent:
         if generated:
             return generated
         name = (mem.get("profile") or {}).get("display_name") or ""
-        return _fallback_general_reply(name, message)
+        return _fallback_general_reply(name, message, str(profile.get("assistant_name") or ""))
 
     async def _extract_memory(self, user_id: str, message: str, intent: str) -> dict[str, Any] | None:
         if intent in {"save_memory", "create_watch"}:
@@ -434,6 +442,7 @@ def _compact_chat_context(
         "style": {
             "verbosity": profile.get("verbosity") or "concise",
             "technical_detail": profile.get("technical_detail") or "",
+            "assistant_name": profile.get("assistant_name") or "",
         },
         "history": [
             {"role": row.get("role"), "content": str(row.get("content") or "")[:180]}
@@ -443,10 +452,15 @@ def _compact_chat_context(
     }
 
 
-def _fallback_general_reply(name: str, message: str) -> str:
+def _fallback_general_reply(name: str, message: str, assistant_name: str = "") -> str:
     """Distinct replies when the model is unavailable. Avoid a single canned line."""
     prefix = f"{name}，" if name else ""
     text = (message or "").strip()
+    chosen_name = _assistant_name_from_message(text)
+    if chosen_name:
+        return f"当然。以后就叫我{chosen_name}，这个名字我记住了。"
+    if re.search(r"(今天|刚才|最近)?.{0,8}(好累|累死|很累|疲惫|压力很大|心情不好|好烦)", text):
+        return "听起来今天确实把你耗得不轻。先别急着把剩下的事都扛着，把最压着你的那件事丢给我，我们一起理一理。"
     if re.search(r"^(你好|您好|hi+|hello|hey|在吗|早上好|晚上好)[!！。.?？]*$", text, re.I):
         return f"{prefix}我在。你可以直接让我关注主题、查询推荐、记录长期信息或创建目标。"
     if re.search(r"(你是谁|你叫什么|介绍一下你|你是什么)", text):
@@ -465,6 +479,14 @@ def _fallback_general_reply(name: str, message: str) -> str:
         f"{prefix}当前模型暂时不可用，我还不能自由闲聊。"
         "你可以让我关注主题、查询推荐、记录长期信息或创建目标。"
     )
+
+
+def _assistant_name_from_message(message: str) -> str:
+    match = re.search(
+        r"(?:以后)?(?:就)?(?:可以)?叫你(?:做|为)?\s*([A-Za-z0-9\u4e00-\u9fff·_-]{1,12}?)(?:吗|吧|好不好|可以吗|，|。|！|？|$)",
+        message or "",
+    )
+    return str(match.group(1) or "").strip() if match else ""
 
 
 def _apply_style(reply: str, profile: dict[str, Any]) -> str:

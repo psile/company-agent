@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import json
 import os
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -18,6 +19,10 @@ from typing import Any
 
 from .config import get_bool, load_env
 from .models import ScoredItem
+
+
+_TOKEN_CACHE: dict[tuple[str, str], tuple[float, str]] = {}
+_TOKEN_LOCK = threading.Lock()
 
 
 def format_card(item: ScoredItem) -> str:
@@ -330,14 +335,32 @@ def lookup_user_profile(tenant_access_token: str, open_id: str) -> dict[str, Any
 
 
 def _tenant_access_token(app_id: str, app_secret: str) -> dict[str, Any]:
+    cache_key = (app_id, hashlib.sha256(app_secret.encode("utf-8")).hexdigest())
+    now = time.time()
+    with _TOKEN_LOCK:
+        cached = _TOKEN_CACHE.get(cache_key)
+        if cached and cached[0] > now:
+            return {"ok": True, "tenant_access_token": cached[1], "cached": True}
     result = _post_json(
         "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
         {"app_id": app_id, "app_secret": app_secret},
     )
     token = result.get("data", {}).get("tenant_access_token") or result.get("tenant_access_token")
     if result.get("ok") and token:
+        raw_ttl = result.get("data", {}).get("expire") or result.get("expire") or 7200
+        try:
+            ttl = max(60, int(raw_ttl) - 300)
+        except (TypeError, ValueError):
+            ttl = 6900
+        with _TOKEN_LOCK:
+            _TOKEN_CACHE[cache_key] = (now + ttl, str(token))
         return {"ok": True, "tenant_access_token": token}
     return {"ok": False, "reason": result.get("reason") or "tenant access token missing", "response": result}
+
+
+def reset_token_cache_for_tests() -> None:
+    with _TOKEN_LOCK:
+        _TOKEN_CACHE.clear()
 
 
 def lookup_open_id_by_mobile(tenant_access_token: str, mobile: str) -> dict[str, Any]:

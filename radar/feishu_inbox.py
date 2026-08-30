@@ -23,6 +23,8 @@ SESSION_ID = "feishu"
 _SEEN_MAX = 2000
 _seen: dict[str, float] = {}
 _seen_lock = threading.Lock()
+_profile_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_profile_lock = threading.Lock()
 _ws_started = False
 _ChatFn = Callable[[Any, str, str], dict[str, Any]]
 _ReplyFn = Callable[..., dict[str, Any]]
@@ -123,6 +125,18 @@ def handle_incoming(
     if not text:
         return {"ok": True, "skipped": "empty", "message_id": message_id}
 
+    chat_id = str(message.get("chat_id") or "")
+    progress_done = threading.Event()
+    progress: dict[str, Any] = {"sent": False, "text": "", "send": {}}
+    progress_timer = _start_progress_reply(
+        text,
+        message_id,
+        chat_id,
+        send_reply or _default_send_reply,
+        progress_done,
+        progress,
+    )
+
     sender_id = sender.get("sender_id") or {}
     open_id = str(sender_id.get("open_id") or sender_id.get("user_id") or "").strip()
     profile = {}
@@ -132,13 +146,26 @@ def handle_incoming(
         print("[feishu-inbox] profile lookup failed", exc)
     user_id = resolve_inbox_user(service, open_id, profile)
     if not user_id:
+        _finish_progress(progress_done, progress_timer)
         return {"ok": False, "skipped": "unmapped", "open_id": open_id, "message_id": message_id}
 
+    started_at = time.perf_counter()
     try:
         result = (chat_fn or _default_chat)(service, user_id, text)
     except Exception as exc:
+        _finish_progress(progress_done, progress_timer)
         print("[feishu-inbox] chat failed", exc)
+        try:
+            (send_reply or _default_send_reply)(
+                message_id=message_id,
+                chat_id=chat_id,
+                text="刚才这一下没接住，可能是连接有点慢。你再发一次，我继续。",
+            )
+        except Exception:
+            pass
         return {"ok": False, "error": str(exc), "user_id": user_id, "message_id": message_id}
+    _finish_progress(progress_done, progress_timer)
+    elapsed_ms = round((time.perf_counter() - started_at) * 1000)
 
     reply = str(result.get("reply") or "").strip()
     sent = {"ok": False, "reason": "empty reply"}
@@ -146,7 +173,7 @@ def handle_incoming(
         try:
             sent = (send_reply or _default_send_reply)(
                 message_id=message_id,
-                chat_id=str(message.get("chat_id") or ""),
+                chat_id=chat_id,
                 text=reply,
             )
         except Exception as exc:
@@ -159,6 +186,8 @@ def handle_incoming(
         "session_id": result.get("session_id") or SESSION_ID,
         "reply": reply,
         "send": sent,
+        "elapsed_ms": elapsed_ms,
+        "progress": progress,
     }
 
 
@@ -373,6 +402,11 @@ def _default_send_reply(*, message_id: str, chat_id: str, text: str) -> dict[str
 
 
 def _default_lookup_profile(open_id: str) -> dict[str, Any]:
+    now = time.time()
+    with _profile_lock:
+        cached = _profile_cache.get(open_id)
+        if cached and cached[0] > now:
+            return dict(cached[1])
     creds = bot_credentials()
     if not creds.get("ready") or not open_id:
         return {}
@@ -381,7 +415,64 @@ def _default_lookup_profile(open_id: str) -> dict[str, Any]:
     token = _tenant_access_token(creds["app_id"], creds["app_secret"])
     if not token.get("ok"):
         return {}
-    return lookup_user_profile(token["tenant_access_token"], open_id)
+    profile = lookup_user_profile(token["tenant_access_token"], open_id)
+    with _profile_lock:
+        _profile_cache[open_id] = (now + (900 if profile else 60), dict(profile))
+    return profile
+
+
+def _progress_delay() -> float:
+    try:
+        return max(0.0, float(get_str("FEISHU_PROGRESS_DELAY", "1.2")))
+    except ValueError:
+        return 1.2
+
+
+def _start_progress_reply(
+    text: str,
+    message_id: str,
+    chat_id: str,
+    send_reply: _ReplyFn,
+    done: threading.Event,
+    progress: dict[str, Any],
+) -> threading.Timer | None:
+    delay = _progress_delay()
+    if delay <= 0:
+        return None
+
+    def send() -> None:
+        if done.is_set():
+            return
+        line = _progress_text(text)
+        try:
+            result = send_reply(message_id=message_id, chat_id=chat_id, text=line)
+        except Exception as exc:
+            result = {"ok": False, "reason": str(exc)}
+        progress.update({"sent": bool(result.get("ok")), "text": line, "send": result})
+
+    timer = threading.Timer(delay, send)
+    timer.daemon = True
+    timer.start()
+    return timer
+
+
+def _finish_progress(done: threading.Event, timer: threading.Timer | None) -> None:
+    done.set()
+    if timer:
+        timer.cancel()
+
+
+def _progress_text(text: str) -> str:
+    message = text or ""
+    if re.search(r"(累|疲惫|烦|压力|难受|心情不好|撑不住)", message):
+        return "我在。你先缓一口气，我认真听着。"
+    if re.search(r"(日报|周报|总结|汇报)", message):
+        return "收到，我正在把任务和进展收拢一下，整理清楚就发你。"
+    if re.search(r"(查|搜索|论文|资料|推荐|最近).*(内容|进展|更新|资料|论文)?", message):
+        return "我在查资料，也会结合你现在的工作筛一遍，稍等我一下。"
+    if re.search(r"(拆解|计划|待办|提醒|安排)", message):
+        return "收到，我正在帮你理清这件事和时间安排，马上好。"
+    return "收到，我正在认真想这件事，稍等我一下。"
 
 
 def _unique_feishu_account(service: Any) -> str | None:
@@ -501,3 +592,5 @@ def _event_dict_from_lark(data: Any) -> dict[str, Any]:
 def reset_seen_for_tests() -> None:
     with _seen_lock:
         _seen.clear()
+    with _profile_lock:
+        _profile_cache.clear()

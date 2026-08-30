@@ -125,4 +125,13 @@ def test_smalltalk_skips_intent_llm(tmp_path, monkeypatch):
     monkeypatch.setattr("radar.agent.llm.chat_json", fake_json)
     out = _chat(svc, "bob", "我可以叫你小鲸吗")
     assert out["intent"] == "general_chat"
+    assert "小鲸" in out["reply"]
+    assert svc.conversation_profile("bob").get()["assistant_name"] == "小鲸"
     assert routed == []
+
+
+def test_emotional_fallback_is_warm_and_actionable(tmp_path, monkeypatch):
+    svc = _svc(tmp_path, monkeypatch)
+    out = _chat(svc, "bob", "小鲸，我今天工作好累")
+    assert "耗得不轻" in out["reply"]
+    assert "一起理一理" in out["reply"]

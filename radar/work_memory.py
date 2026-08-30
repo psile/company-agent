@@ -89,6 +89,7 @@ class WorkMemory:
                 "parent_task_id": str(data.get("parent_task_id") or "").strip(),
                 "priority": data.get("priority"),
                 "status": data.get("status"),
+                "scheduled_at": str(data.get("scheduled_at") or "").strip(),
                 "deadline": str(data.get("deadline") or "").strip(),
                 "estimated_duration": str(data.get("estimated_duration") or "").strip(),
                 "source_type": str(data.get("source_type") or source_type).strip() or source_type,

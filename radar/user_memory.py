@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 from typing import Any
+from uuid import uuid4
 
 from .store import LocalMemory, _read_json, _write_json
 
@@ -35,9 +37,17 @@ DEFAULT_INTERESTS = [
 
 DEFAULT_PROJECT = {
     "project": "Personal Work Secretary Agent",
+    "project_id": "personal-work-secretary-agent",
+    "summary": "",
+    "objective": "",
     "stage": "方案设计 / 技术调研",
+    "status": "active",
     "topics": ["Memory", "Personalization", "Proactive Recommendation"],
     "priority": "high",
+    "start_date": "",
+    "target_date": "",
+    "acceptance_criteria": [],
+    "milestones": [],
 }
 
 DEFAULT_BEHAVIOR = {
@@ -60,6 +70,7 @@ class UserMemory:
         self.profile_path = self.root / "profile.json"
         self.interest_path = self.root / "interests.json"
         self.project_path = self.root / "project.json"
+        self.projects_path = self.root / "projects.json"
         self.behavior_path = self.root / "behavior.json"
         if not self.profile_path.exists():
             _write_json(self.profile_path, dict(DEFAULT_PROFILE))
@@ -130,14 +141,82 @@ class UserMemory:
         return ranked
 
     def project(self) -> dict[str, Any]:
-        return _read_json(self.project_path, dict(DEFAULT_PROJECT))
+        data = self._project_collection()
+        active_id = str(data.get("active_id") or "")
+        rows = list(data.get("items") or [])
+        active = next((row for row in rows if row.get("project_id") == active_id), None)
+        return dict(active or (rows[0] if rows else DEFAULT_PROJECT))
+
+    def projects(self) -> list[dict[str, Any]]:
+        return [dict(row) for row in self._project_collection().get("items") or []]
 
     def save_project(self, payload: dict[str, Any]) -> dict[str, Any]:
-        merged = dict(DEFAULT_PROJECT)
-        merged.update(self.project())
+        current = self.project()
+        return self.update_project(str(current.get("project_id") or ""), payload)
+
+    def create_project(self, payload: dict[str, Any]) -> dict[str, Any]:
+        row = _normalize_project(payload)
+        if not row.get("project"):
+            raise ValueError("project required")
+        data = self._project_collection()
+        items = list(data.get("items") or [])
+        existing = {str(item.get("project_id") or "") for item in items}
+        base_id = str(row.get("project_id") or _project_slug(row["project"]) or f"project-{uuid4().hex[:8]}")
+        project_id = base_id
+        suffix = 2
+        while project_id in existing:
+            project_id = f"{base_id}-{suffix}"
+            suffix += 1
+        row["project_id"] = project_id
+        row["created_at"] = _now()
+        row["updated_at"] = row["created_at"]
+        items.append(row)
+        self._save_projects(items, project_id)
+        return row
+
+    def update_project(self, project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        data = self._project_collection()
+        items = list(data.get("items") or [])
+        target_id = project_id or str(data.get("active_id") or "")
+        index = next((i for i, row in enumerate(items) if str(row.get("project_id") or "") == target_id), -1)
+        if index < 0:
+            raise KeyError(target_id)
+        merged = dict(items[index])
         merged.update(payload or {})
-        _write_json(self.project_path, merged)
+        merged["project_id"] = target_id
+        merged = _normalize_project(merged)
+        merged["updated_at"] = _now()
+        items[index] = merged
+        self._save_projects(items, str(data.get("active_id") or target_id))
         return merged
+
+    def activate_project(self, project_id: str) -> dict[str, Any]:
+        data = self._project_collection()
+        items = list(data.get("items") or [])
+        selected = next((row for row in items if str(row.get("project_id") or "") == project_id), None)
+        if not selected:
+            raise KeyError(project_id)
+        self._save_projects(items, project_id)
+        return dict(selected)
+
+    def _project_collection(self) -> dict[str, Any]:
+        raw = _read_json(self.projects_path, {})
+        if isinstance(raw, dict) and raw.get("items"):
+            return raw
+        legacy = _read_json(self.project_path, dict(DEFAULT_PROJECT))
+        row = _normalize_project(legacy)
+        if not row.get("project_id"):
+            row["project_id"] = _project_slug(str(row.get("project") or "")) or f"project-{uuid4().hex[:8]}"
+        data = {"active_id": row["project_id"], "items": [row]}
+        _write_json(self.projects_path, data)
+        _write_json(self.project_path, row)
+        return data
+
+    def _save_projects(self, items: list[dict[str, Any]], active_id: str) -> None:
+        active = next((row for row in items if str(row.get("project_id") or "") == active_id), items[0] if items else {})
+        _write_json(self.projects_path, {"active_id": active_id, "items": items})
+        if active:
+            _write_json(self.project_path, active)
 
     def behavior(self) -> dict[str, Any]:
         merged = dict(DEFAULT_BEHAVIOR)
@@ -256,6 +335,69 @@ def _topics_from_item(item: dict[str, Any]) -> list[str]:
             seen.add(low)
             out.append(topic)
     return out[:8]
+
+
+def _project_slug(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", (value or "").lower()).strip("-")
+    return slug[:64]
+
+
+def _normalize_project(payload: dict[str, Any] | None) -> dict[str, Any]:
+    raw = dict(payload or {})
+    topics = raw.get("topics") or []
+    if isinstance(topics, str):
+        topics = [part.strip() for part in re.split(r"[,，、\n]+", topics) if part.strip()]
+    criteria = []
+    for index, item in enumerate(raw.get("acceptance_criteria") or []):
+        if isinstance(item, dict):
+            text = str(item.get("text") or item.get("title") or "").strip()
+            done = bool(item.get("done"))
+            item_id = str(item.get("id") or f"accept-{index + 1}")
+        else:
+            text = str(item or "").strip()
+            done = False
+            item_id = f"accept-{index + 1}"
+        if text:
+            criteria.append({"id": item_id, "text": text[:240], "done": done})
+    milestones = []
+    for index, item in enumerate(raw.get("milestones") or []):
+        if not isinstance(item, dict):
+            item = {"title": str(item or "")}
+        title = str(item.get("title") or "").strip()
+        if not title:
+            continue
+        status = str(item.get("status") or "pending").strip().lower()
+        if status not in {"pending", "in_progress", "done"}:
+            status = "pending"
+        milestones.append(
+            {
+                "id": str(item.get("id") or f"milestone-{index + 1}"),
+                "title": title[:160],
+                "due_date": str(item.get("due_date") or "").strip()[:10],
+                "status": status,
+            }
+        )
+    status = str(raw.get("status") or "active").strip().lower()
+    if status not in {"planning", "active", "paused", "done"}:
+        status = "active"
+    priority = str(raw.get("priority") or "medium").strip().lower()
+    if priority not in {"low", "medium", "high", "urgent"}:
+        priority = "medium"
+    return {
+        **raw,
+        "project": str(raw.get("project") or "").strip()[:160],
+        "project_id": str(raw.get("project_id") or "").strip()[:80],
+        "summary": str(raw.get("summary") or "").strip()[:1200],
+        "objective": str(raw.get("objective") or "").strip()[:600],
+        "stage": str(raw.get("stage") or "").strip()[:120],
+        "status": status,
+        "priority": priority,
+        "start_date": str(raw.get("start_date") or "").strip()[:10],
+        "target_date": str(raw.get("target_date") or "").strip()[:10],
+        "topics": [str(item).strip()[:80] for item in topics if str(item).strip()][:20],
+        "acceptance_criteria": criteria[:30],
+        "milestones": milestones[:30],
+    }
 
 
 def _now() -> str:

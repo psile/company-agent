@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from . import ingest, intelligence, recommender
 from .channels import send_for_user
@@ -364,6 +365,10 @@ class RadarService:
         push = scope.workspace.push_settings()
         behavior = ctx.get("behavior") or {}
         counts = behavior.get("counts") or {}
+        events = scope.memory.events()
+        feedback_actions = {"like", "useful", "collect", "star", "dislike", "skip", "dismiss"}
+        handled_ids = {row.get("id") for row in events if row.get("action") in feedback_actions}
+        pending_feedback = [row for row in for_you if row.get("id") not in handled_ids]
         st = self.status(scope.user_id)
         return {
             "ok": True,
@@ -391,21 +396,23 @@ class RadarService:
             "for_you": for_you,
             "work": work,
             "personal": personal,
+            "pending_feedback": pending_feedback,
             "cards": cards,
-            "events": scope.memory.events()[:30],
+            "events": events[:30],
             "push_settings": push,
             "weekly_topics": _weekly_topics(for_you, ctx.get("interests") or []),
             "stats": {
                 "work": len(work),
                 "personal": len(personal),
                 "knowledge": len(cards),
-                "pending_feedback": max(0, len(for_you) and 2 or 0),
+                "pending_feedback": len(pending_feedback),
                 "likes": int(counts.get("like") or 0),
                 "collects": int(counts.get("collect") or 0),
                 "feedback": int(counts.get("like") or 0) + int(counts.get("dislike") or 0),
             },
             "brief": _brief_preview(for_you, work, personal, observe, push),
             "tracker": self.project_tracker(scope.user_id),
+            "project_trackers": self.list_project_trackers(scope.user_id),
             "skills": self.list_office_skills(),
         }
 
@@ -536,11 +543,51 @@ class RadarService:
             end_time=end_time,
         )
 
-    def project_tracker(self, user_id: str | None = None) -> dict:
+    def project_tracker(self, user_id: str | None = None, project_id: str | None = None) -> dict:
         from .skills.project_tracker.service import project_snapshot
 
         uid = self.identity.require(user_id)
-        return project_snapshot(self, uid)
+        project = None
+        if project_id:
+            project = next(
+                (row for row in self._scope(uid).user_memory.projects() if row.get("project_id") == project_id),
+                None,
+            )
+        return project_snapshot(self, uid, project)
+
+    def create_project(self, payload: dict, user_id: str | None = None) -> dict:
+        uid = self.identity.require(user_id)
+        scope = self._scope(uid)
+        row = scope.user_memory.create_project(payload or {})
+        self._record_project_change(scope, row, "项目已创建")
+        return {"project": row, "tracker": self.project_tracker(uid, row["project_id"])}
+
+    def update_project(self, project_id: str, payload: dict, user_id: str | None = None) -> dict:
+        uid = self.identity.require(user_id)
+        scope = self._scope(uid)
+        row = scope.user_memory.update_project(project_id, payload or {})
+        self._record_project_change(scope, row, "项目已更新")
+        return {"project": row, "tracker": self.project_tracker(uid, project_id)}
+
+    def activate_project(self, project_id: str, user_id: str | None = None) -> dict:
+        uid = self.identity.require(user_id)
+        scope = self._scope(uid)
+        row = scope.user_memory.activate_project(project_id)
+        self._record_project_change(scope, row, "已切换当前项目")
+        return {"project": row, "tracker": self.project_tracker(uid, project_id)}
+
+    @staticmethod
+    def _record_project_change(scope: Any, project: dict, content: str) -> None:
+        scope.work.add_event(
+            {
+                "event_type": "project_updated",
+                "title": str(project.get("project") or "项目"),
+                "content": content,
+                "source_type": "manual",
+                "source_ref": str(project.get("project_id") or ""),
+                "project_id": str(project.get("project_id") or ""),
+            }
+        )
 
     def work_summary(self, user_id: str | None = None, range_days: int = 7, now=None) -> dict:
         from .skills.work_summary.service import build_work_summary
