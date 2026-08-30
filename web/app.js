@@ -53,9 +53,10 @@ const state = {
   token: localStorage.getItem("radar_session") || "",
   registerMode: false,
   route: "/",
-  recTab: "work",
+  recTab: "all",
   recFilter: "all",
   recSort: "score",
+  recDetailId: null,
   knowledgeCat: "全部",
   selectedCard: null,
   query: "",
@@ -201,11 +202,12 @@ function matchQuery(item) {
 
 function recCard(item) {
   const score = Number(item.score || 0);
+  const laneLabel = { work: "工作情报", industry: "行业动态", discovery: "轻松发现", personal: "兴趣延伸" }[item.lane] || "为你推荐";
   return `
-    <article class="item" data-id="${escapeHtml(item.id)}">
+    <article class="item rec-card" data-id="${escapeHtml(item.id)}">
       <div class="item-top">
         <div>
-          <div class="tiny">${escapeHtml(item.source_name || "")} · ${escapeHtml(fmtTime(item.published_at))}</div>
+          <div class="rec-meta"><span class="tag">${laneLabel}</span><span>${escapeHtml(item.source_name || "")}</span>${item.author_name ? `<span>${escapeHtml(item.author_name)}</span>` : ""}<span>${escapeHtml(fmtTime(item.published_at))}</span></div>
           <h3>${escapeHtml(item.title)}</h3>
         </div>
         <div class="rel">
@@ -214,17 +216,48 @@ function recCard(item) {
           <div class="meter"><span style="width:${score}%"></span></div>
         </div>
       </div>
-      <p class="muted" style="margin:0">${escapeHtml(item.summary_zh || item.summary || "")}</p>
-      <div class="tags">${tagsHtml(item.tags)}${score >= 85 ? '<span class="tag green">高相关</span>' : ""}</div>
-      ${item.why_you ? `<p class="why"><strong>为什么推荐给你</strong>${escapeHtml(item.why_you)}</p>` : ""}
-      ${item.project_value ? `<p class="proj"><strong>与你当前项目的关系</strong>${escapeHtml(item.project_value)}</p>` : ""}
-      <div class="row-actions">
-        <button class="btn-ghost" data-open="${escapeHtml(item.id)}" type="button">查看原文</button>
+      <p class="rec-summary">${escapeHtml(item.summary_zh || item.summary || "")}</p>
+      <div class="tags rec-tags">${tagsHtml((item.tags || []).slice(0, 3))}${score >= 85 ? '<span class="tag green">高相关</span>' : ""}</div>
+      ${item.why_you ? `<p class="rec-reason">${escapeHtml(item.why_you)}</p>` : ""}
+      <div class="row-actions rec-actions">
+        <button class="btn" data-rec-detail="${escapeHtml(item.id)}" type="button">阅读详情</button>
         <button class="btn-ghost" data-act="useful" data-id="${escapeHtml(item.id)}" type="button">有用</button>
         <button class="btn-ghost" data-act="collect" data-id="${escapeHtml(item.id)}" type="button">收藏</button>
         <button class="btn-ghost" data-act="dislike" data-id="${escapeHtml(item.id)}" type="button">减少此类推荐</button>
       </div>
     </article>`;
+}
+
+function recommendationDetailHtml() {
+  if (!state.recDetailId || !state.dash) return "";
+  const items = [...(state.dash.for_you || []), ...(state.dash.intel || [])];
+  const item = items.find((row) => row.id === state.recDetailId);
+  if (!item) return "";
+  const score = Number(item.score || 0);
+  const laneLabel = { work: "工作情报", industry: "行业动态", discovery: "轻松发现", personal: "兴趣延伸" }[item.lane] || "为你推荐";
+  const points = (item.key_points || item.innovation || []).slice(0, 3);
+  return `<div class="task-editor-backdrop rec-detail-backdrop" data-rec-backdrop>
+    <aside class="task-editor rec-detail" role="dialog" aria-modal="true" aria-labelledby="recDetailTitle">
+      <div class="task-editor-head">
+        <div><span class="tiny">${laneLabel} · ${escapeHtml(item.source_name || "")}</span><h2 id="recDetailTitle">${escapeHtml(item.title || "")}</h2></div>
+        <button class="icon-btn" id="recDetailClose" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="rec-detail-score"><b>${score}%</b><span>${relLabel(score)}</span><div class="meter"><span style="width:${score}%"></span></div></div>
+      ${item.author_name ? `<div class="rec-author"><b>${escapeHtml(item.author_name)}</b>${item.author_badge_text ? `<span>${escapeHtml(item.author_badge_text)}</span>` : ""}<span>赞同 ${Number(item.vote_up_count || 0)} · 评论 ${Number(item.comment_count || 0)}</span></div>` : ""}
+      <section class="rec-detail-section"><h3>简要总结</h3><p>${escapeHtml(item.summary_zh || item.summary || "")}</p></section>
+      ${points.length ? `<section class="rec-detail-section"><h3>三点看懂</h3><ol>${points.map((point) => `<li>${escapeHtml(point)}</li>`).join("")}</ol></section>` : ""}
+      ${item.impact ? `<section class="rec-detail-section"><h3>可能带来的影响</h3><p>${escapeHtml(item.impact)}</p></section>` : ""}
+      ${item.interesting_point ? `<section class="rec-detail-section"><h3>有意思的是</h3><p>${escapeHtml(item.interesting_point)}</p></section>` : ""}
+      ${item.why_you ? `<section class="rec-detail-section"><h3>为什么推荐给你</h3><p>${escapeHtml(item.why_you)}</p></section>` : ""}
+      ${item.project_value ? `<section class="rec-detail-section"><h3>与你当前项目的关系</h3><p>${escapeHtml(item.project_value)}</p></section>` : ""}
+      ${item.what_to_watch ? `<section class="rec-detail-section"><h3>接下来关注</h3><p>${escapeHtml(item.what_to_watch)}</p></section>` : ""}
+      <div class="tags">${tagsHtml(item.tags || [])}</div>
+      <div class="task-editor-actions">
+        <button class="btn-ghost" data-act="collect" data-id="${escapeHtml(item.id)}" type="button">收藏</button>
+        <button class="btn" data-open="${escapeHtml(item.id)}" type="button">打开原文</button>
+      </div>
+    </aside>
+  </div>`;
 }
 
 function isActive(href) {
@@ -502,13 +535,16 @@ function pageRecommend() {
       .filter((row) => !handledIds.has(row.id));
   const pool = state.recTab === "feedback"
     ? feedbackPool
-    : state.recTab === "work" ? dash.work || [] : dash.personal || [];
+    : state.recTab === "work" ? dash.work || []
+      : state.recTab === "personal" ? dash.personal || []
+        : dash.for_you || [];
   let items = pool.filter(matchQuery);
   if (state.recFilter === "high") items = items.filter((row) => Number(row.score || 0) >= 85);
   if (state.recFilter === "paper") items = items.filter((row) => sourceKind(row) === "paper");
   if (state.recFilter === "github") items = items.filter((row) => sourceKind(row) === "github");
   if (state.recFilter === "blog") items = items.filter((row) => sourceKind(row) === "blog");
   if (state.recFilter === "news") items = items.filter((row) => sourceKind(row) === "news");
+  if (state.recFilter === "discovery") items = items.filter((row) => row.lane === "discovery");
   if (state.recFilter === "product") items = items.filter((row) => sourceKind(row) === "github" || /release|产品/.test(JSON.stringify(row)));
   items = [...items].sort((a, b) =>
     state.recSort === "new" ? String(b.published_at || "").localeCompare(String(a.published_at || "")) : Number(b.score || 0) - Number(a.score || 0)
@@ -520,28 +556,29 @@ function pageRecommend() {
     <div class="page-head">
       <div>
         <h1>${state.recTab === "feedback" ? "待处理反馈" : "为你推荐"}</h1>
-        <p>${state.recTab === "feedback" ? "告诉 Agent 哪些内容有用、值得收藏或不再需要，让后续推荐更准确。" : "基于你的兴趣、当前项目、目标和行为，为你筛选真正值得关注的内容。"}</p>
+        <p>${state.recTab === "feedback" ? "告诉 Agent 哪些内容有用、值得收藏或不再需要，让后续推荐更准确。" : `本轮为你筛选 ${items.length} 条，先看简报，感兴趣再展开详情。`}</p>
       </div>
     </div>
     <div class="tabs">
+      <button class="tab${state.recTab === "all" ? " is-on" : ""}" data-rectab="all" type="button">全部推荐 ${dash.for_you?.length || 0}</button>
       <button class="tab${state.recTab === "work" ? " is-on" : ""}" data-rectab="work" type="button">工作推荐</button>
       <button class="tab${state.recTab === "personal" ? " is-on" : ""}" data-rectab="personal" type="button">个人推荐</button>
       <button class="tab${state.recTab === "feedback" ? " is-on" : ""}" data-rectab="feedback" type="button">待处理反馈</button>
     </div>
     <div class="chips" style="margin:12px 0">
-      ${[["all","全部"],["high","高相关"],["paper","论文"],["github","GitHub"],["blog","Blog"],["product","产品动态"],["news","新闻"]].map(([id,label]) => `<button class="chip${state.recFilter===id?" is-on":""}" data-filter="${id}" type="button">${label}</button>`).join("")}
+      ${[["all","全部"],["high","高相关"],["paper","论文"],["github","GitHub"],["blog","Blog"],["product","产品动态"],["news","行业新闻"],["discovery","轻松发现"]].map(([id,label]) => `<button class="chip${state.recFilter===id?" is-on":""}" data-filter="${id}" type="button">${label}</button>`).join("")}
       <select data-sort>
         <option value="score"${state.recSort==="score"?" selected":""}>排序：相关度</option>
         <option value="new"${state.recSort==="new"?" selected":""}>排序：最新</option>
       </select>
     </div>
     <div class="layout">
-      <div class="stack">${items.length ? items.map(recCard).join("") : (state.recTab === "feedback" ? '<div class="empty">推荐反馈已经处理完了。新的推荐出现后会显示在这里。</div>' : emptyFeed())}</div>
+      <div class="recommend-grid">${items.length ? items.map(recCard).join("") : (state.recTab === "feedback" ? '<div class="empty">推荐反馈已经处理完了。新的推荐出现后会显示在这里。</div>' : emptyFeed())}</div>
       <aside class="stack">
         <section class="card">
           <h3>推荐偏好</h3>
           <p>兴趣领域：${(dash.interests || []).slice(0,4).map((r)=>r.topic).join("、") || "—"}</p>
-          <p>内容来源：Blog / GitHub / 论文</p>
+          <p>内容来源：工作情报 / 行业新闻 / 产品动态 / 轻松发现</p>
           <p>推荐强度：${push.high_only ? "只推高相关" : "均衡"}</p>
           <p>推送频率：每天 ${escapeHtml(push.morning_time || "08:30")}</p>
           <a class="btn-ghost" href="#/settings/prefs">去设置</a>
@@ -572,7 +609,7 @@ function followForm() {
   }
   if (state.followKind === "source") {
     return `
-    <p class="tiny">指定 RSS / Blog / GitHub 仓库，Agent 会在后台持续采集，可随时在列表中删除。</p>
+    <p class="tiny">指定 RSS / Blog / GitHub 仓库，Agent 会在后台持续采集。微信公众号可填写自建 RSSHub 的真实订阅地址。</p>
     <div class="field"><label>信息源名称</label><input id="sourceName" placeholder="OpenAI Blog" /></div>
     <div class="field"><label>链接（RSS 地址或 GitHub 仓库）</label><input id="sourceUrl" placeholder="https://" /></div>
     <div class="field"><label>类型</label><select id="sourceType"><option value="blog">官方 Blog / RSS</option><option value="release">代码仓库 Releases</option><option value="news">行业新闻</option></select></div>
@@ -615,7 +652,7 @@ function pageFollows() {
   const products = (overview.products || dash.products || []);
   const sources = (overview.sources || dash.sources || []);
   const focus = overview.focus || [];
-  const typeMap = { paper: "学术论文", release: "代码发布", blog: "官方 Blog", news: "行业新闻", arxiv: "学术论文" };
+  const typeMap = { paper: "学术论文", release: "代码发布", blog: "官方 Blog", news: "行业新闻", article: "中文内容", arxiv: "学术论文" };
   const editing = state.editingProduct;
   return `
     <div class="page-head">
@@ -674,10 +711,10 @@ function pageFollows() {
           <table class="table">
             <thead><tr><th>信息源</th><th>类型</th><th>关注内容</th><th>最近采集</th><th>操作</th></tr></thead>
             <tbody>${sources.length ? sources.map((src) => `<tr>
-              <td>${escapeHtml(src.name)}${src.custom ? ' <span class="tag">自定义</span>' : ""}</td>
+              <td>${escapeHtml(src.name)}${src.custom ? ' <span class="tag">自定义</span>' : ""}${src.ready === false ? ' <span class="tag orange">待授权</span>' : ""}</td>
               <td>${escapeHtml(typeMap[src.type] || src.type || src.kind)}</td>
               <td class="tiny">${escapeHtml(src.search || src.repo || src.url || "—")}</td>
-              <td class="tiny">${src.count ? `${escapeHtml(src.latest_title || "")}<br>${escapeHtml(src.latest_at || "")} · ${src.count} 条` : "暂无采集记录"}</td>
+              <td class="tiny">${src.ready === false ? `需要配置 ${escapeHtml(src.credential_env || "平台凭证")}` : src.count ? `${escapeHtml(src.latest_title || "")}<br>${escapeHtml(src.latest_at || "")} · ${src.count} 条` : "暂无采集记录"}</td>
               <td class="tiny">${src.custom ? `<button class="btn-ghost" data-source-delete="${escapeHtml(src.id)}" type="button">删除</button>` : "内置源"}</td>
             </tr>`).join("") : '<tr><td colspan="5" class="tiny">还没有信息源。</td></tr>'}</tbody>
           </table>
@@ -1251,9 +1288,9 @@ function pageProfile() {
   const push = dash.push_settings || {};
   const stats = dash.stats || {};
   const likes = (dash.cards || []).slice(0, 6);
-  const ratio = Number(push.work_personal_ratio || 80);
-  const types = ["技术文章","学术论文","GitHub","产品动态","行业资讯"];
-  const selectedTypes = push.content_types || ["技术文章","行业资讯"];
+  const ratio = Number(push.work_personal_ratio || 55);
+  const types = ["技术文章","学术论文","GitHub","产品动态","行业资讯","轻松发现"];
+  const selectedTypes = push.content_types || ["技术文章","行业资讯","产品动态","轻松发现"];
   return `
     <div class="page-head">
       <div>
@@ -1289,7 +1326,7 @@ function pageProfile() {
         <h2>推荐偏好</h2>
         <div class="chips" id="typeChips">${types.map((t)=>`<button class="chip${selectedTypes.includes(t)?" is-on":""}" data-type="${t}" type="button">${t}</button>`).join("")}</div>
         <div class="field" style="margin-top:12px"><label>摘要长度</label>
-          <select id="summaryLen">${["简洁","中等","详细"].map((x)=>`<option${(push.summary_length||"中等")===x?" selected":""}>${x}</option>`).join("")}</select>
+          <select id="summaryLen">${["简洁","中等","详细"].map((x)=>`<option${(push.summary_length||"详细")===x?" selected":""}>${x}</option>`).join("")}</select>
         </div>
         <div class="field"><label>推送时间</label>
           <select id="pushClock">${["08:30","12:30","18:30"].map((x)=>`<option${(push.push_clock||push.morning_time||"12:30")===x?" selected":""}>${x}</option>`).join("")}</select>
@@ -1497,9 +1534,9 @@ function pageSettingsLlm() {
 function pageSettingsPrefs() {
   const dash = state.dash;
   const push = dash.push_settings || {};
-  const ratio = Number(push.work_personal_ratio || 80);
-  const types = ["技术文章","学术论文","GitHub","产品动态","行业资讯"];
-  const selectedTypes = push.content_types || ["技术文章","行业资讯"];
+  const ratio = Number(push.work_personal_ratio || 55);
+  const types = ["技术文章","学术论文","GitHub","产品动态","行业资讯","轻松发现"];
+  const selectedTypes = push.content_types || ["技术文章","行业资讯","产品动态","轻松发现"];
   return `
     <div class="page-head">
       <div>
@@ -1511,7 +1548,7 @@ function pageSettingsPrefs() {
       <h2>内容类型</h2>
       <div class="chips" id="typeChips">${types.map((t)=>`<button class="chip${selectedTypes.includes(t)?" is-on":""}" data-type="${t}" type="button">${t}</button>`).join("")}</div>
       <div class="field" style="margin-top:12px"><label>摘要长度</label>
-        <select id="summaryLen">${["简洁","中等","详细"].map((x)=>`<option${(push.summary_length||"中等")===x?" selected":""}>${x}</option>`).join("")}</select>
+        <select id="summaryLen">${["简洁","中等","详细"].map((x)=>`<option${(push.summary_length||"详细")===x?" selected":""}>${x}</option>`).join("")}</select>
       </div>
       <div class="field"><label>推送时间</label>
         <select id="pushClock">${["08:30","12:30","18:30"].map((x)=>`<option${(push.push_clock||push.morning_time||"12:30")===x?" selected":""}>${x}</option>`).join("")}</select>
@@ -1606,7 +1643,7 @@ function hashLocation() {
 function syncRouteState() {
   const { path, params } = hashLocation();
   const tab = path === "/feedback" ? "feedback" : params.get("tab");
-  if (["work", "personal", "feedback"].includes(tab)) state.recTab = tab;
+  if (["all", "work", "personal", "feedback"].includes(tab)) state.recTab = tab;
 }
 
 function render() {
@@ -1627,7 +1664,7 @@ function render() {
     return;
   }
   const view = PAGES[state.route] || pageHome;
-  $("page").innerHTML = view();
+  $("page").innerHTML = view() + recommendationDetailHtml();
   if (state.pendingChatExample && $("chatInput")) {
     $("chatInput").value = state.pendingChatExample;
     $("chatInput").focus();
@@ -1714,8 +1751,16 @@ async function refreshFeeds(btn) {
 }
 
 document.addEventListener("click", async (event) => {
-  const t = event.target.closest("[data-act],[data-open],[data-rectab],[data-filter],[data-cat],[data-card],[data-topic],[data-example],[data-toggle],[data-move],[data-followkind],[data-chat-session],[data-chat-example],[data-task-act],[data-task-edit],[data-task-new],[data-work-date],[data-work-shift],[data-work-view],[data-project-select],[data-project-accept],[data-project-milestone],[data-report-tab],[data-skill],[data-llm-preset],[data-copy-report],[data-export-report],[data-regen-report],[data-jump-day],[data-interest-weight],[data-interest-delete],[data-product-edit],[data-product-cancel],[data-product-save],[data-product-toggle],[data-source-delete],[data-add-goal],[data-save-edit-goal],[data-cancel-edit-goal],[data-delete-goal],#newChatBtn,#saveConversationProfileBtn,#refreshBtn,#refreshBtn2,#followBtn,#addGoalBtn,#savePrefBtn,#savePushBtn,#pushNowBtn,#briefBtn,#noticeBtn,#saveProfileBtn,#exportBtn,#addProductBtn,#addSourceBtn,#addFollowGoalBtn,#logoutBtn,#savePassBtn,#saveFeishuBtn,#llmEnabledBtn,#saveLlmBtn,#testLlmBtn,#generateReportBtn,#copyReportBtn,#exportReportBtn,#saveReportBtn,#addWorkTaskBtn,#workTodayBtn,#taskEditorClose,#taskEditorCancel,#newProjectBtn,#editProjectBtn,#addProjectTaskBtn,#addProjectTaskBtn2,#projectEditorClose,#projectEditorCancel");
+  const t = event.target.closest("[data-act],[data-open],[data-rec-detail],[data-rec-backdrop],[data-rectab],[data-filter],[data-cat],[data-card],[data-topic],[data-example],[data-toggle],[data-move],[data-followkind],[data-chat-session],[data-chat-example],[data-task-act],[data-task-edit],[data-task-new],[data-work-date],[data-work-shift],[data-work-view],[data-project-select],[data-project-accept],[data-project-milestone],[data-report-tab],[data-skill],[data-llm-preset],[data-copy-report],[data-export-report],[data-regen-report],[data-jump-day],[data-interest-weight],[data-interest-delete],[data-product-edit],[data-product-cancel],[data-product-save],[data-product-toggle],[data-source-delete],[data-add-goal],[data-save-edit-goal],[data-cancel-edit-goal],[data-delete-goal],#recDetailClose,#newChatBtn,#saveConversationProfileBtn,#refreshBtn,#refreshBtn2,#followBtn,#addGoalBtn,#savePrefBtn,#savePushBtn,#pushNowBtn,#briefBtn,#noticeBtn,#saveProfileBtn,#exportBtn,#addProductBtn,#addSourceBtn,#addFollowGoalBtn,#logoutBtn,#savePassBtn,#saveFeishuBtn,#llmEnabledBtn,#saveLlmBtn,#testLlmBtn,#generateReportBtn,#copyReportBtn,#exportReportBtn,#saveReportBtn,#addWorkTaskBtn,#workTodayBtn,#taskEditorClose,#taskEditorCancel,#newProjectBtn,#editProjectBtn,#addProjectTaskBtn,#addProjectTaskBtn2,#projectEditorClose,#projectEditorCancel");
   if (!t) return;
+  if (t.dataset.recDetail) {
+    state.recDetailId = t.dataset.recDetail;
+    return render();
+  }
+  if (t.id === "recDetailClose" || (t.dataset.recBackdrop !== undefined && t === event.target)) {
+    state.recDetailId = null;
+    return render();
+  }
   if (t.dataset.chatSession) {
     state.activeSessionId = t.dataset.chatSession;
     const detail = await api(`/api/conversations/${encodeURIComponent(state.activeSessionId)}`);

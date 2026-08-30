@@ -67,8 +67,23 @@ def send_for_user(
         if cfg.get("ready"):
             result = push_text(text, app=cfg)
             result["user_id"] = user_id
-            WebChannel(notify).send_message(user_id, content)
-            return result
+            if result.get("ok"):
+                WebChannel(notify).send_message(user_id, content)
+                return result
+            inbox = _try_inbox_push(service, user_id, text)
+            if inbox.get("ok"):
+                WebChannel(notify).send_message(user_id, content)
+                return {
+                    **inbox,
+                    "ok": True,
+                    "channel": "feishu_inbox",
+                    "user_id": user_id,
+                    "fallback_reason": result.get("reason") or "app message failed",
+                }
+            mocked = mock.send_message(user_id, content)
+            mocked["ok"] = False
+            mocked["reason"] = result.get("reason") or inbox.get("reason") or "feishu send failed"
+            return mocked
         mocked = mock.send_message(user_id, content)
         mocked["reason"] = cfg.get("reason") or "feishu account incomplete"
         inbox = _try_inbox_push(service, user_id, text)

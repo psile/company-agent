@@ -7,6 +7,7 @@ def _svc(tmp_path: Path, monkeypatch) -> RadarService:
     monkeypatch.setenv("RADAR_LLM", "0")
     monkeypatch.setenv("MEMORYOS_ENABLED", "0")
     monkeypatch.setenv("FEISHU_MODE", "mock")
+    monkeypatch.setenv("RADAR_DEMO_CONTENT", "1")
     return RadarService(data_dir=tmp_path)
 
 

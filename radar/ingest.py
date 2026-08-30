@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import ssl
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -62,6 +64,8 @@ def fetch_one(spec: dict) -> list[RawItem]:
         return fetch_rss(spec)
     if kind == "url":
         return fetch_url(spec)
+    if kind in {"zhihu_search", "global_search"}:
+        return fetch_zhihu_open_search(spec)
     raise ValueError(f"unknown kind: {kind}")
 
 
@@ -132,6 +136,73 @@ def fetch_rss(spec: dict) -> list[RawItem]:
     return items[:limit]
 
 
+def fetch_zhihu_open_search(spec: dict) -> list[RawItem]:
+    """Use Zhihu's authorized search APIs; never scrape Zhihu or WeChat pages."""
+    secret = (os.environ.get(str(spec.get("credential_env") or "ZHIHU_ACCESS_SECRET")) or "").strip()
+    if not secret:
+        return []
+    kind = str(spec.get("kind") or "zhihu_search")
+    endpoint = "global_search" if kind == "global_search" else "zhihu_search"
+    base = (os.environ.get("ZHIHU_OPENAPI_BASE_URL") or "https://developer.zhihu.com").rstrip("/")
+    limit = max(1, min(20 if kind == "global_search" else 10, int(spec.get("max") or 8)))
+    searches = spec.get("searches") or [spec.get("search")]
+    searches = [str(value).strip() for value in searches if str(value or "").strip()]
+    if not searches:
+        return []
+    allowed = [str(host).lower() for host in (spec.get("allowed_hosts") or [])]
+    items: list[RawItem] = []
+    seen: set[str] = set()
+    for search in searches:
+        per_query_limit = min(10, limit)
+        params = {"Query": search, "Count": per_query_limit}
+        if kind == "global_search" and spec.get("filter"):
+            params["Filter"] = str(spec["filter"])
+        if kind == "global_search" and spec.get("search_db"):
+            params["SearchDB"] = str(spec["search_db"])
+        query = urllib.parse.urlencode(params)
+        payload = _get_json(
+            f"{base}/api/v1/content/{endpoint}?{query}",
+            {
+                "Authorization": f"Bearer {secret}",
+                "X-Request-Timestamp": str(int(time.time())),
+                "Content-Type": "application/json",
+            },
+        )
+        for row in _search_result_rows(payload):
+            url = _first_text(row, "Url", "url", "URL", "link", "href", "source_url", "content_url")
+            title = _first_text(row, "title", "Title", "name", "question")
+            if not url or not title or url in seen or not _host_allowed(url, allowed):
+                continue
+            seen.add(url)
+            metadata = {
+                "author_name": _first_text(row, "AuthorName", "author_name", "author"),
+                "author_badge_text": _first_text(row, "AuthorBadgeText", "author_badge_text"),
+                "vote_up_count": _as_int(row.get("VoteUpCount", row.get("vote_up_count"))),
+                "comment_count": _as_int(row.get("CommentCount", row.get("comment_count"))),
+                "authority_level": _first_text(row, "AuthorityLevel", "authority_level"),
+                "ranking_score": _as_float(row.get("RankingScore", row.get("ranking_score"))),
+                "content_id": _first_text(row, "ContentID", "content_id"),
+            }
+            if len(searches) > 1:
+                metadata["search_query"] = search
+            items.append(
+                RawItem(
+                    source_id=spec["id"],
+                    source_name=spec.get("name") or ("微信公众号" if kind == "global_search" else "知乎"),
+                    channel=spec.get("channel", "work"),
+                    title=_clean(title),
+                    summary=_clean(_first_text(row, "ContentText", "summary", "snippet", "excerpt", "description", "content", "abstract"))[:280],
+                    source_url=url,
+                    published_at=_search_published_at(row),
+                    item_type=_platform_content_type(row, spec),
+                    metadata=metadata,
+                )
+            )
+            if len(items) >= limit:
+                return items
+    return items
+
+
 def parse_atom(xml: str, spec: dict) -> list[RawItem]:
     root = ET.fromstring(xml)
     items: list[RawItem] = []
@@ -195,6 +266,75 @@ def _get(url: str) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/xml,application/json,*/*"})
     with urllib.request.urlopen(req, timeout=TIMEOUT, context=_CTX) as resp:
         return resp.read().decode("utf-8", errors="replace")
+
+
+def _get_json(url: str, headers: dict[str, str]) -> dict:
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **headers})
+    with urllib.request.urlopen(req, timeout=TIMEOUT, context=_CTX) as resp:
+        payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+    if not isinstance(payload, dict):
+        raise ValueError("search API returned a non-object response")
+    code = payload.get("Code", payload.get("code", 0))
+    if code not in (0, "0", None):
+        raise ValueError(str(payload.get("Message") or payload.get("message") or code))
+    return payload
+
+
+def _search_result_rows(value) -> list[dict]:
+    rows: list[dict] = []
+    if isinstance(value, dict):
+        if any(value.get(key) for key in ("Url", "url", "URL", "link", "href", "source_url", "content_url")):
+            rows.append(value)
+        for child in value.values():
+            rows.extend(_search_result_rows(child))
+    elif isinstance(value, list):
+        for child in value:
+            rows.extend(_search_result_rows(child))
+    return rows
+
+
+def _first_text(row: dict, *keys: str) -> str:
+    for key in keys:
+        value = row.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _search_published_at(row: dict) -> str:
+    value = row.get("EditTime")
+    if isinstance(value, (int, float)) and value > 0:
+        from datetime import datetime, timezone
+
+        return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
+    return _first_text(row, "published_at", "publish_time", "created_at", "date", "time")
+
+
+def _platform_content_type(row: dict, spec: dict) -> str:
+    raw = _first_text(row, "ContentType", "content_type").lower()
+    return {"article": "article", "answer": "article", "question": "article"}.get(raw, spec.get("type") or "article")
+
+
+def _as_int(value) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _as_float(value) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _host_allowed(url: str, allowed: list[str]) -> bool:
+    try:
+        host = (urllib.parse.urlparse(url).hostname or "").lower()
+    except ValueError:
+        return False
+    return bool(host) and (not allowed or any(host == domain or host.endswith(f".{domain}") for domain in allowed))
 
 
 def _text(node: ET.Element, tag: str) -> str:

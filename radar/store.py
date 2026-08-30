@@ -8,6 +8,9 @@ import os
 import threading
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
+
+from .config import get_bool
 
 _JSON_LOCKS: dict[str, threading.Lock] = {}
 _JSON_LOCKS_GUARD = threading.Lock()
@@ -183,12 +186,21 @@ class ContentPool:
 
         self.root = pool_dir
         self.items_path = pool_dir / "items.json"
+        self.allow_demo = get_bool("RADAR_DEMO_CONTENT", False)
+        self.rejected_ids: set[str] = set()
         self.root.mkdir(parents=True, exist_ok=True)
         if not self.items_path.exists():
-            _write_json(self.items_path, {"items": list(DEMO_ITEMS)})
+            _write_json(self.items_path, {"items": list(DEMO_ITEMS) if self.allow_demo else []})
+        elif not self.allow_demo:
+            raw = list(_read_json(self.items_path, {"items": []}).get("items") or [])
+            kept = [row for row in raw if is_publishable_item(row)]
+            self.rejected_ids = {str(row.get("id") or "") for row in raw if not is_publishable_item(row)}
+            if len(kept) != len(raw):
+                _write_json(self.items_path, {"items": kept})
 
     def items(self) -> list[dict[str, Any]]:
-        return list(_read_json(self.items_path, {"items": []}).get("items") or [])
+        rows = list(_read_json(self.items_path, {"items": []}).get("items") or [])
+        return rows if self.allow_demo else [row for row in rows if is_publishable_item(row)]
 
     def merge(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         by_id: dict[str, dict[str, Any]] = {}
@@ -197,7 +209,7 @@ class ContentPool:
                 by_id[str(row["id"])] = dict(row)
         for row in rows:
             item_id = str(row.get("id") or "")
-            if not item_id:
+            if not item_id or (not self.allow_demo and not is_publishable_item(row)):
                 continue
             by_id[item_id] = {**by_id.get(item_id, {}), **row}
         items = list(by_id.values())
@@ -209,3 +221,19 @@ class ContentPool:
             if row.get("id") == item_id or row.get("source_url") == item_id:
                 return row
         return None
+
+
+PLACEHOLDER_HOSTS = {"example.com", "www.example.com", "example.org", "www.example.org", "example.net", "www.example.net"}
+
+
+def is_publishable_url(value: str) -> bool:
+    try:
+        parsed = urlparse(str(value or "").strip())
+    except ValueError:
+        return False
+    host = (parsed.hostname or "").lower()
+    return parsed.scheme in {"http", "https"} and bool(host) and host not in PLACEHOLDER_HOSTS
+
+
+def is_publishable_item(item: dict[str, Any]) -> bool:
+    return is_publishable_url(str(item.get("source_url") or ""))

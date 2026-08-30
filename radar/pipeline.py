@@ -18,7 +18,7 @@ from .memory_os import HierarchicalMemory
 from .notify import NotificationLog
 from .proactive import decide_proactive_notification
 from .seeds import bootstrap_new_user, bootstrap_user_dir, spec_by_id
-from .store import ContentPool, LocalMemory, _read_json, _write_json
+from .store import ContentPool, LocalMemory, _read_json, _write_json, is_publishable_item
 from .user_memory import UserMemory
 from .work_memory import WorkMemory
 from .workspace import Workspace, classify_knowledge, parse_follow_text
@@ -59,6 +59,7 @@ class RadarService:
         self.reminders_service = ReminderService(self.root / "users")
         self._ensure_demo()
         self.pool = ContentPool(self.root / "pool")
+        self._purge_placeholder_content(self.pool.rejected_ids)
         self.observe_path = self.root / "pool" / "observe.json"
         self.sources = ingest.load_source_config(sources_path or SOURCES_PATH)
         default = self._scope(self.identity.default_id())
@@ -286,8 +287,8 @@ class RadarService:
             "feishu_app": bool(feishu.get("app_id")),
             "feishu_mode": get_str("FEISHU_MODE", "mock"),
             "push": {
-                "threshold": get_int("RADAR_PUSH_THRESHOLD", 85),
-                "limit": get_int("RADAR_PUSH_LIMIT", 2),
+                "threshold": get_int("RADAR_PUSH_THRESHOLD", 78),
+                "limit": get_int("RADAR_PUSH_LIMIT", 3),
                 "dry_run": get_bool("RADAR_PUSH_DRY_RUN", False),
             },
             "memory": self._memory_snapshot(scope.user_id),
@@ -305,7 +306,7 @@ class RadarService:
         if understood:
             self.pool.merge(understood)
         items = self.pool.items()
-        intel = recommender.rank_world(items)[:10]
+        intel = recommender.rank_world(items)[:18]
         targets = [self.identity.require(user_id)] if user_id else self.identity.active_ids()
         recs: dict[str, dict] = {}
         pushed: list[dict] = []
@@ -339,11 +340,21 @@ class RadarService:
         intel: list[dict] | None = None,
     ) -> dict:
         scope = self._scope(user_id)
-        pool_items = items if items is not None else self.pool.items()
+        pool_items = [
+            intelligence.ensure_rich_summary(row)
+            for row in (items if items is not None else self.pool.items())
+            if self.pool.allow_demo or is_publishable_item(row)
+        ]
         ctx = scope.user_memory.context()
-        intel_rows = intel if intel is not None else recommender.rank_world(pool_items)[:10]
-        personal = recommender.rank_for_you(pool_items, ctx)[:10]
-        personal = recommender.rerank_with_llm(personal, ctx, scope.memory.pushed_ids())
+        feed_limit = get_int("RADAR_FEED_LIMIT", 30)
+        intel_rows = intel if intel is not None else recommender.rank_world(pool_items)[:feed_limit]
+        ranked = recommender.rank_for_you(pool_items, ctx)
+        personal = recommender.rerank_with_llm(ranked[: max(24, feed_limit * 2)], ctx, scope.memory.pushed_ids())
+        personal = recommender.diversify_feed(
+            personal,
+            limit=feed_limit,
+            work_ratio=int(scope.workspace.push_settings().get("work_personal_ratio") or 55),
+        )
         scope.memory.save_feeds(intel_rows, personal, intel=intel_rows, for_you=personal)
         pushed = self._auto_push(scope, personal) if auto_push else []
         return {
@@ -864,6 +875,8 @@ class RadarService:
                     "search": spec.get("search") or "",
                     "repo": spec.get("repo") or "",
                     "url": spec.get("url") or "",
+                    "credential_env": spec.get("credential_env") or "",
+                    "ready": not spec.get("credential_env") or bool(get_str(str(spec.get("credential_env")), "")),
                     "custom": str(spec.get("id") or "").startswith("user-"),
                     "count": len(hits),
                     "latest_title": str(hits[0].get("title") or "")[:80] if hits else "",
@@ -945,23 +958,62 @@ class RadarService:
         return self._push_item(scope, feed[0])
 
     def _auto_push(self, scope: UserScope, candidates: list[dict]) -> list[dict]:
+        settings = scope.workspace.push_settings()
+        env_threshold = get_int("RADAR_PUSH_THRESHOLD", 78)
+        threshold = (
+            max(env_threshold, int(settings.get("high_threshold") or 75))
+            if settings.get("high_only")
+            else min(env_threshold, int(settings.get("instant_threshold") or 78))
+        )
+        push_limit = get_int("RADAR_PUSH_LIMIT", 3)
         picked = recommender.pick_push(
             candidates,
             scope.memory.pushed_ids(),
-            limit=get_int("RADAR_PUSH_LIMIT", 2),
-            threshold=get_int("RADAR_PUSH_THRESHOLD", 85),
+            limit=push_limit,
+            threshold=threshold,
         )
+        daily_discovery_id = ""
+        if not settings.get("high_only") and not _pushed_today(scope.notify.list(), "daily_discovery"):
+            already = set(scope.memory.pushed_ids()) | {str(row.get("id") or "") for row in picked}
+            wider = next(
+                (
+                    row for row in candidates
+                    if row.get("lane") in {"industry", "discovery"}
+                    and row.get("id") not in already
+                    and int(row.get("score") or 0) >= 60
+                ),
+                None,
+            )
+            if wider:
+                picked = (picked[: max(0, push_limit - 1)] + [wider])[:push_limit]
+                daily_discovery_id = str(wider.get("id") or "")
         results = []
         for item in picked:
+            lane = str(item.get("lane") or "personal")
+            scores = item.get("scores") or {}
+            candidate = {
+                **item,
+                "current_goal_match": scores.get("project", 0.35 if lane != "work" else 0.75),
+                "source_quality": scores.get("quality", 0.7),
+                "user_preference": max(float(scores.get("interest") or 0), float(scores.get("feedback") or 0.65)),
+                "interrupt_cost": 0.1 if lane in {"industry", "discovery"} else 0.16,
+                "urgency": 0.8 if lane in {"industry", "discovery"} else 0.35,
+            }
+            decision_settings = dict(settings)
+            decision_settings["instant_threshold"] = min(
+                float(settings.get("instant_threshold") or 78),
+                58 if lane in {"industry", "discovery"} else 72,
+            )
             decision = decide_proactive_notification(
-                item,
+                candidate,
                 self.conversation_profile(scope.user_id).get(),
-                scope.workspace.push_settings(),
+                decision_settings,
             )
             if decision.decision != "push_now":
                 results.append({"ok": True, "id": item.get("id"), "proactive": decision.to_dict()})
                 continue
-            pushed = self._push_item(scope, item)
+            push_type = "daily_discovery" if str(item.get("id") or "") == daily_discovery_id else "high_relevance"
+            pushed = self._push_item(scope, item, push_type=push_type)
             pushed["proactive"] = decision.to_dict()
             results.append(pushed)
             if pushed.get("ok"):
@@ -969,11 +1021,18 @@ class RadarService:
                 scope.hierarchy.add_memory(
                     user_input=f"系统准备把《{item.get('title')}》推到飞书",
                     agent_response=item.get("why_you") or item.get("summary_zh") or "",
-                    meta={"action": "push", "id": item.get("id")},
+                    meta={"action": "push", "id": item.get("id"), "lane": lane, "type": push_type},
                 )
         return results
 
-    def _push_item(self, scope: UserScope, item: dict) -> dict:
+    def _push_item(self, scope: UserScope, item: dict, push_type: str = "high_relevance") -> dict:
+        if not is_publishable_item(item):
+            return {
+                "ok": False,
+                "id": item.get("id"),
+                "title": item.get("title"),
+                "reason": "来源链接无效或属于演示占位域名，已阻止推送",
+            }
         text = format_push(item)
         result = send_for_user(
             scope.user_id,
@@ -981,16 +1040,45 @@ class RadarService:
             {
                 **item,
                 "text": text,
-                "type": "high_relevance",
+                "type": push_type,
                 "content": item.get("summary_zh") or item.get("summary") or "",
             },
             feishu_cfg=self._feishu_raw(scope.user_id),
+            service=self,
         )
         result["id"] = item.get("id")
         result["title"] = item.get("title")
         result["summary_zh"] = item.get("summary_zh")
         result["tags"] = item.get("tags") or []
         return result
+
+    def _purge_placeholder_content(self, rejected_ids: set[str]) -> None:
+        if not rejected_ids:
+            return
+        for uid in self.identity.active_ids():
+            root = self.root / "users" / uid
+            memory = LocalMemory(root)
+            feeds = memory.feeds()
+            clean = lambda rows: [row for row in (rows or []) if row.get("id") not in rejected_ids and is_publishable_item(row)]
+            memory.save_feeds(clean(feeds.get("intel")), clean(feeds.get("for_you")), intel=clean(feeds.get("intel")), for_you=clean(feeds.get("for_you")))
+            for path, container in (
+                (root / "pushed.json", "ids"),
+                (root / "notifications.json", "items"),
+            ):
+                payload = _read_json(path, {container: []})
+                if container == "ids":
+                    payload[container] = [key for key in payload.get(container, []) if key not in rejected_ids]
+                else:
+                    payload[container] = [
+                        row for row in payload.get(container, [])
+                        if row.get("recommendation_id") not in rejected_ids
+                        and not any(host in str(row.get("content") or "") for host in ("example.com", "example.org", "example.net"))
+                    ]
+                _write_json(path, payload)
+            for path in (root / "cards.json", root / "events.json"):
+                rows = _read_json(path, [])
+                if isinstance(rows, list):
+                    _write_json(path, [row for row in rows if row.get("id") not in rejected_ids and "example.com" not in str(row.get("source_url") or "")])
 
     def _file_card(self, scope: UserScope, item: dict) -> dict:
         category = classify_knowledge(item)
@@ -1058,6 +1146,19 @@ def _split_channels(items: list[dict]) -> tuple[list[dict], list[dict]]:
     if not work and items:
         return items[: max(1, (len(items) + 1) // 2)], items[max(1, (len(items) + 1) // 2) :]
     return work, personal
+
+
+def _pushed_today(notifications: list[dict], push_type: str) -> bool:
+    today = datetime.now(timezone.utc).date()
+    for row in notifications:
+        if row.get("type") != push_type:
+            continue
+        try:
+            if datetime.fromisoformat(str(row.get("created_at") or "")).date() == today:
+                return True
+        except ValueError:
+            continue
+    return False
 
 
 def _enrich_card(card: dict) -> dict:

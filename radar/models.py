@@ -21,6 +21,7 @@ class RawItem:
     source_url: str
     published_at: str = ""
     item_type: str = "article"  # paper | release | blog | news | page
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)

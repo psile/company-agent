@@ -13,9 +13,22 @@
 
 ## 本轮更新
 
-相对 GitHub `main` 上一次「对话秘书」提交，这次把秘书从「能聊、能推资讯」推进到「能记待办、能到点提醒、能写总结」。
+这次重点不是继续堆页面，而是把「主动感知 → 理解 → 推荐 → 推送 → 反馈学习」真正跑通。Agent 现在会持续观察真实外部信息，结合用户的兴趣、项目、目标和行为筛选内容，并在相关度足够高时主动发到飞书。
 
-### 增加了哪些功能
+### 推荐与主动服务升级
+
+| 能力 | 当前实现 |
+|---|---|
+| **真实内容源** | 接入 arXiv、GitHub Release、技术博客、行业新闻、知乎站内搜索和微信公众号文章搜索 |
+| **来源真实性** | 所有推荐必须包含可访问的原文 URL；按允许域名校验，自动过滤 `example.com` 等占位地址，禁止用演示数据冒充线上内容 |
+| **多主题观察** | 微信公众号按自动驾驶、世界模型、多模态大模型、智能座舱等主题分别检索，再跨查询去重，避免组合关键词过窄导致无结果 |
+| **分层推荐** | 工作推荐聚焦当前项目和目标，个人推荐补充行业新闻、产品动态和值得一看的趣事；保留来源类型多样性 |
+| **丰富中文理解** | 每条内容生成中文摘要、3 个要点、影响判断、后续观察点、标签、推荐理由以及与当前项目的关系 |
+| **卡片与详情** | 列表先展示可快速浏览的紧凑卡片；点击后打开详情，再查看完整总结、作者、热度、关联和原文 |
+| **主动观察与推送** | 后台按周期采集；高相关内容通过飞书应用机器人一对一推送，并记录已推送项防止重复打扰 |
+| **反馈闭环** | 打开、有用、收藏、减少推荐等行为进入用户记忆，持续调整主题权重和推荐排序 |
+
+### 工作秘书能力
 
 | 能力 | 你怎么用 | 说明 |
 |---|---|---|
@@ -111,6 +124,8 @@
 | `#/settings/push` | 推送与通知 | Web / 飞书 / 对话、Morning Brief、高相关即时推送 |
 
 每一条推荐都必须有：中文摘要、来源、相关度、**为什么推荐给你**、**与当前项目的关系**、原文 / 有用 / 收藏 / 减少此类推荐。
+
+推荐列表采用「卡片摘要 + 详情抽屉」：列表负责快速扫描，点开后再查看完整要点、影响、观察点、作者与互动数据。系统不会为缺失来源的内容补造链接。
 
 点赞之后不是「点赞成功」，而是：已记录你的偏好，将提高相关主题的推荐权重。
 
@@ -214,16 +229,56 @@ LLM_MODEL=deepseek-ai/DeepSeek-V4-Flash
 | `FEISHU_SECRET` | 群机器人签名密钥 | 未开签名则留空 |
 | `RADAR_HOST` | HTTP 监听地址 | `127.0.0.1` 或 `0.0.0.0` |
 | `PORT` | 端口 | `8765` |
-| `RADAR_PUSH_THRESHOLD` | 自动推送分数阈值 | `85` |
-| `RADAR_PUSH_LIMIT` | 每次刷新最多推几条 | `2` |
+| `RADAR_PUSH_THRESHOLD` | 自动推送分数阈值 | `78` |
+| `RADAR_PUSH_LIMIT` | 单次刷新最多即时推送数 | `3` |
+| `RADAR_FEED_LIMIT` | 每位用户保留的推荐条数 | `30` |
+| `RADAR_OBSERVE_MINUTES` | 后台主动观察间隔（分钟） | `60` |
+| `RADAR_OBSERVE_ON_START` | 启动后是否立即采集 | `1` |
+| `ZHIHU_ACCESS_SECRET` | 知乎开放平台 Access Secret | 开启知乎站内搜索及微信公众号域名检索 |
+| `ZHIHU_OPENAPI_BASE_URL` | 知乎开放平台地址 | 默认 `https://developer.zhihu.com` |
 | `RADAR_PUSH_DRY_RUN=1` | 只生成文案，不真实发送 | `0` |
-| `RADAR_OBSERVE_MINUTES` | 后台定时拉源间隔（分钟） | `180`；`0` 关闭 |
-| `RADAR_OBSERVE_ON_START=1` | 启动后立刻采集一次 | 默认 `0` |
 | `RADAR_REMIND_MINUTES` | 后台扫描到期提醒的间隔（分钟） | `1`；`0` 关闭循环（仍可按 `RADAR_REMIND_ON_START` 启动时扫一次） |
 | `RADAR_REMIND_ON_START` | 启动数秒后立刻扫一遍提醒 | 默认 `1` |
 | `MEMORYOS_ENABLED` | 尝试官方 MemoryOS | `0` |
 
 `ingest` 显示 `pushed=0` 时，通常不是飞书坏了，而是没有内容达到 `RADAR_PUSH_THRESHOLD`，或该条已在 `data/pushed.json` 里记过。
+
+---
+
+## 接入知乎与微信公众号内容
+
+项目通过知乎开放平台的授权 API 获取知乎内容，并使用开放平台全网搜索限定 `mp.weixin.qq.com` 域名获取微信公众号文章。项目不会抓取登录墙，也不会伪造文章或原文链接。
+
+### 1. 获取 Access Secret
+
+1. 打开 [知乎开放平台](https://developer.zhihu.com/)，创建应用并开通知乎搜索相关能力。
+2. 在应用凭据页面取得 Access Secret。
+3. 只把 Secret 写入本机 `.env`，不要填写到 `sources.json`、README 或前端设置中。
+
+```env
+ZHIHU_ACCESS_SECRET=你的_Access_Secret
+# 通常不需要修改
+ZHIHU_OPENAPI_BASE_URL=https://developer.zhihu.com
+```
+
+### 2. 配置观察主题
+
+知乎和公众号来源位于 `sources.json`：
+
+- `kind: "zhihu_search"`：知乎站内搜索。
+- `kind: "global_search"`：全网搜索；公众号来源必须保留 `filter: "host==\"mp.weixin.qq.com\""` 和 `allowed_hosts` 校验。
+- `searches`：可配置多个独立主题。系统逐个查询、按真实 URL 去重，再限制最终条数。
+- `max`：该来源一次最多进入候选池的条数。
+
+### 3. 验证
+
+```powershell
+python -m radar ingest
+```
+
+成功时终端会显示本轮抓取数、工作/个人推荐数和飞书推送结果。页面「我的关注」可管理来源状态，「为你推荐」可按知乎、公众号、论文、GitHub、博客、产品动态和新闻筛选。
+
+如果知乎或公众号为空，依次检查：Access Secret 是否有效、应用能力是否开通、查询词是否过窄、来源的 `allowed_hosts` 是否正确。不要用示例链接填充空结果。
 
 ---
 
@@ -250,8 +305,14 @@ FEISHU_APP_ID=cli_xxx
 FEISHU_APP_SECRET=xxx
 FEISHU_RECEIVE_ID_TYPE=email
 FEISHU_RECEIVE_ID=your.name@example.com
-RADAR_PUSH_THRESHOLD=85
-RADAR_PUSH_LIMIT=2
+FEISHU_MODE=developer
+RADAR_PUSH_THRESHOLD=78
+RADAR_PUSH_LIMIT=3
+RADAR_FEED_LIMIT=30
+RADAR_OBSERVE_MINUTES=60
+RADAR_OBSERVE_ON_START=1
+# 在 https://developer.zhihu.com/ 申请，密钥只保存在本机，不提交 Git
+ZHIHU_ACCESS_SECRET=
 ```
 
 手机号登录、没有邮箱时：

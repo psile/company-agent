@@ -39,12 +39,26 @@ def format_push(item: dict | ScoredItem) -> str:
     summary = data.get("summary_zh") or data.get("summary") or ""
     why = data.get("why_you") or data.get("why") or ""
     project = data.get("project_value") or ""
+    points = [str(x).strip() for x in (data.get("key_points") or data.get("innovation") or []) if str(x).strip()][:3]
+    impact = str(data.get("impact") or "").strip()
+    watch = str(data.get("what_to_watch") or "").strip()
+    interesting = str(data.get("interesting_point") or "").strip()
+    lane_name = {
+        "work": "工作情报",
+        "industry": "行业动态",
+        "discovery": "轻松发现",
+        "personal": "个人兴趣",
+    }.get(str(data.get("lane") or ""), "为你发现")
     score = data.get("score") or 0
     lines = [
-        f"【为你发现】{data.get('title')}",
+        f"【{lane_name}】{data.get('title')}",
         f"标签 {tags}" if tags else "",
         f"相关度 {score}%",
         f"总结：{summary}" if summary else "",
+        "要点：\n" + "\n".join(f"- {point}" for point in points) if points else "",
+        f"影响：{impact}" if impact else "",
+        f"有意思的是：{interesting}" if interesting else "",
+        f"接下来关注：{watch}" if watch else "",
         f"为什么推给你：{why}" if why else "",
         f"和当前项目：{project}" if project else "",
         f"原文 {data.get('source_url')}",
