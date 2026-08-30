@@ -365,10 +365,10 @@ function pageHome() {
       </div>
     </div>
     <div class="stats">
-      ${stat("工作推荐", stats.work, "+工作上下文")}
-      ${stat("个人推荐", stats.personal, "长期兴趣")}
-      ${stat("新增知识", stats.knowledge, "点赞/收藏沉淀")}
-      ${stat("待处理反馈", stats.pending_feedback, "让它更懂你")}
+      ${stat("工作推荐", stats.work, "+工作上下文", "#/recommend?tab=work")}
+      ${stat("个人推荐", stats.personal, "长期兴趣", "#/recommend?tab=personal")}
+      ${stat("新增知识", stats.knowledge, "点赞/收藏沉淀", "#/knowledge")}
+      ${stat("待处理反馈", stats.pending_feedback, "让它更懂你", "#/feedback")}
     </div>
     <div class="layout">
       <section class="stack">
@@ -408,8 +408,9 @@ function pageHome() {
     </div>`;
 }
 
-function stat(label, value, hint) {
-  return `<section class="card stat"><span>${escapeHtml(label)}</span><b>${value || 0}</b><span class="up">${escapeHtml(hint)}</span></section>`;
+function stat(label, value, hint, href) {
+  if (!href) return `<section class="card stat"><span>${escapeHtml(label)}</span><b>${value || 0}</b><span class="up">${escapeHtml(hint)}</span></section>`;
+  return `<section class="card stat" onclick="go('${href}'); return false;"><span>${escapeHtml(label)}</span><b>${value || 0}</b><a class="stat-link" href="${href}" style="pointer-events:none">${escapeHtml(hint)}</a></section>`;
 }
 
 function goalMini(label, goal) {
@@ -1200,6 +1201,13 @@ function pageSettingsMembers() {
     </section>`;
 }
 
+// 全局路由跳转函数
+function go(hash) {
+  if (hash.startsWith("#")) hash = hash.slice(1);
+  location.hash = hash;
+}
+
+// PAGES 映射表（页面路由）
 const PAGES = {
   "/": pageHome,
   "/chat": pageChat,

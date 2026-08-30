@@ -303,11 +303,34 @@ button { cursor: pointer; }
 .track-list { margin: 0; padding-left: 18px; display: grid; gap: 8px; }
 
 .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
-.stat { padding: 14px 16px; min-width: 0; }
+.stat {
+  padding: 14px 16px;
+  min-width: 0;
+}
 .stat b { display: block; font-size: 22px; }
 .stat span { color: var(--muted); font-size: 12px; }
 .up { color: var(--ok); }
 .down { color: var(--danger); }
+
+/* 可点击的统计卡片 */
+.stat-link {
+  color: var(--brand);
+  font-size: 12px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.stat-link:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
+/* 包裹卡片的 a 标签不要影响布局 */
+.card a {
+  color: inherit;
+  text-decoration: none;
+  display: inline;
+}
 
 .item {
   display: grid;
