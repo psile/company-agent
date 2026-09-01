@@ -122,6 +122,60 @@
       "allowed_hosts": ["mp.weixin.qq.com"],
       "credential_env": "ZHIHU_ACCESS_SECRET",
       "max": 12
+    },
+    {
+      "id": "qbitai",
+      "name": "量子位",
+      "kind": "rss",
+      "type": "news",
+      "channel": "industry",
+      "url": "https://www.qbitai.com/feed",
+      "max": 8
+    },
+    {
+      "id": "36kr",
+      "name": "36氪",
+      "kind": "rss",
+      "type": "news",
+      "channel": "industry",
+      "url": "https://36kr.com/feed",
+      "max": 8
+    },
+    {
+      "id": "geekpark",
+      "name": "极客公园",
+      "kind": "rss",
+      "type": "news",
+      "channel": "industry",
+      "url": "https://www.geekpark.net/rss",
+      "max": 6
+    },
+    {
+      "id": "infoq-cn",
+      "name": "InfoQ 中文站",
+      "kind": "rss",
+      "type": "news",
+      "channel": "work",
+      "url": "https://www.infoq.cn/feed",
+      "max": 6
+    },
+    {
+      "id": "solidot",
+      "name": "Solidot",
+      "kind": "rss",
+      "type": "news",
+      "channel": "discovery",
+      "url": "https://www.solidot.org/index.rss",
+      "max": 6
+    },
+    {
+      "id": "sspai",
+      "name": "少数派",
+      "kind": "rss",
+      "type": "news",
+      "channel": "discovery",
+      "url": "https://sspai.com/feed",
+      "max": 5
     }
   ]
 }

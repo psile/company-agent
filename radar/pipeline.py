@@ -266,6 +266,24 @@ class RadarService:
         llm.set_data_dir(self.root)
         return llm.test_llm_connection()
 
+    def zhihu_settings(self, user_id: str | None = None) -> dict:
+        from . import settings_zhihu as mod
+
+        uid = self.identity.require(user_id)
+        return mod.public_zhihu_settings(uid)
+
+    def save_zhihu_settings(self, payload: dict | None = None, user_id: str | None = None) -> dict:
+        from . import settings_zhihu as mod
+
+        uid = self.identity.require(user_id)
+        return mod.save_zhihu_settings(uid, payload)
+
+    def test_zhihu_connection(self, user_id: str | None = None) -> dict:
+        from . import settings_zhihu as mod
+
+        uid = self.identity.require(user_id)
+        return mod.test_zhihu_connection(uid)
+
     def _feishu_raw(self, user_id: str | None = None) -> dict:
         uid = self.identity.require(user_id)
         path = self.root / "users" / uid / "feishu.json"
@@ -399,6 +417,7 @@ class RadarService:
                 "push": st["push"],
             },
             "llm_settings": self.llm_settings(),
+            "zhihu_settings": self.zhihu_settings(scope.user_id),
             "profile": ctx.get("profile") or {},
             "interests": ctx.get("interests") or [],
             "project": ctx.get("project") or {},

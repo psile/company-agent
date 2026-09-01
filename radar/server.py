@@ -248,6 +248,9 @@ def make_handler(service: RadarService):
     add("PUT", "/api/push-settings", "user", lambda h, uid, _p, _q, body: h._json(200, service.save_push_settings(body or {}, user_id=uid)))
     add("PUT", "/api/account/feishu", "user", lambda h, uid, _p, _q, body: h._json(200, service.save_feishu_settings(body or {}, user_id=uid)))
     add("PUT", "/api/settings/llm", "user", lambda h, uid, _p, _q, body: h._json(200, service.save_llm_settings(body or {})))
+    add("GET", "/api/settings/zhihu", "user", lambda h, uid, *_: h._json(200, service.zhihu_settings(user_id=uid)))
+    add("PUT", "/api/settings/zhihu", "user", lambda h, uid, _p, _q, body: h._json(200, service.save_zhihu_settings(body or {}, user_id=uid)))
+    add("POST", "/api/settings/zhihu/test", "user", lambda h, uid, *_: h._json(200, service.test_zhihu_connection(user_id=uid)))
     add("PUT", "/api/conversation-profile", "user", lambda h, uid, _p, _q, body: h._json(200, service.save_conversation_profile(body or {}, user_id=uid)))
     add(
         "PUT",

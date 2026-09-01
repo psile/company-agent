@@ -29,6 +29,7 @@ const SETTINGS_ITEMS = [
   { href: "#/settings/profile", label: "个人信息" },
   { href: "#/settings/security", label: "账号与安全" },
   { href: "#/settings/llm", label: "大模型" },
+  { href: "#/settings/zhihu", label: "知乎 API" },
   { href: "#/settings/prefs", label: "偏好设置" },
   { href: "#/settings/push", label: "推送与通知" },
   { href: "#/settings/privacy", label: "数据与隐私" },
@@ -1531,6 +1532,29 @@ function pageSettingsLlm() {
     </section>`;
 }
 
+function pageSettingsZhihu() {
+  const zhihu = state.dash.zhihu_settings || {};
+  const sourceLabels = { settings: "界面配置", env: "环境变量", none: "未配置" };
+  const source = sourceLabels[zhihu.source] || zhihu.source || "未配置";
+  return `
+    <div class="page-head">
+      <div>
+        <h1>知乎 API</h1>
+        <p>配置知乎开放平台 Secret，用于搜索自动驾驶/智能座舱等话题。密钥只保存在本机 data/users/${escapeHtml(state.userId || "")}/zhihu.json。</p>
+      </div>
+    </div>
+    <section class="card" style="max-width:640px">
+      <p class="feishu-verify ${zhihu.active ? "is-ok" : ""}">${zhihu.active ? "知乎搜索已接通" : "尚未配置：知乎搜索源将跳过"} · 来源 ${escapeHtml(source)}${zhihu.secret_set ? " · " + escapeHtml(zhihu.secret_preview || "") : ""}</p>
+      <div class="field"><label>Secret Key</label><input id="zhihuSecret" type="password" autocomplete="off" placeholder="${zhihu.secret_set ? "已保存，留空则不修改" : "填写知乎开放平台 Access Secret"}" /></div>
+      <div class="field"><label>API 地址</label><input id="zhihuBaseUrl" value="${escapeHtml(zhihu.base_url || "https://developer.zhihu.com")}" placeholder="https://developer.zhihu.com" /></div>
+      <p class="hint">在知乎开放平台（developer.zhihu.com）创建应用后获取 Access Secret。配置后，sources.json 中的知乎搜索源和微信公众号搜索源将自动使用此密钥。</p>
+      <div class="row-actions">
+        <button class="btn" id="saveZhihuBtn" type="button">保存</button>
+        <button class="btn-ghost" id="testZhihuBtn" type="button">测试连接</button>
+      </div>
+    </section>`;
+}
+
 function pageSettingsPrefs() {
   const dash = state.dash;
   const push = dash.push_settings || {};
@@ -1619,6 +1643,7 @@ const PAGES = {
   "/settings/profile": pageSettingsProfile,
   "/settings/security": pageSettingsSecurity,
   "/settings/llm": pageSettingsLlm,
+  "/settings/zhihu": pageSettingsZhihu,
   "/settings/prefs": pageSettingsPrefs,
   "/settings/privacy": pageSettingsPrivacy,
   "/settings/members": pageSettingsMembers,
@@ -2227,6 +2252,35 @@ document.addEventListener("click", async (event) => {
       return load();
     } catch (err) {
       toast(err.message || "测试大模型连接失败");
+      return;
+    }
+  }
+  if (t.id === "saveZhihuBtn") {
+    try {
+      await api("/api/settings/zhihu", { method: "PUT", body: JSON.stringify({
+        secret: $("zhihuSecret").value,
+        base_url: $("zhihuBaseUrl").value.trim(),
+      }) });
+      if ($("zhihuSecret")) $("zhihuSecret").value = "";
+      toast("知乎 API 设置已保存。");
+      return load();
+    } catch (err) {
+      toast(err.message || "保存知乎设置失败");
+      return;
+    }
+  }
+  if (t.id === "testZhihuBtn") {
+    try {
+      await api("/api/settings/zhihu", { method: "PUT", body: JSON.stringify({
+        secret: $("zhihuSecret").value,
+        base_url: $("zhihuBaseUrl").value.trim(),
+      }) });
+      if ($("zhihuSecret")) $("zhihuSecret").value = "";
+      const out = await api("/api/settings/zhihu/test", { method: "POST", body: "{}" });
+      toast(out.ok ? `连接成功：${out.reply || "ok"}` : (out.reason || "连接失败"));
+      return load();
+    } catch (err) {
+      toast(err.message || "测试知乎连接失败");
       return;
     }
   }

@@ -19,6 +19,22 @@ USER_AGENT = "RadarME-secretary-demo/0.1 (research; +local)"
 TIMEOUT = 10
 
 _CTX = ssl.create_default_context()
+# 宽松版 context：兼容部分国内网站证书链不完整的情况
+_CTX_UNSAFE = ssl._create_unverified_context()
+# 网络代理：读取 RADAR_PROXY（优先）或 HTTP_PROXY/HTTPS_PROXY 环境变量，
+# 只对被墙源生效时可通过 RADAR_PROXY_SOURCES 指定源 id 列表（逗号分隔，空 = 全部走代理）。
+_PROXY_URL = os.environ.get("RADAR_PROXY") or os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
+_PROXY_SOURCES_RAW = os.environ.get("RADAR_PROXY_SOURCES") or ""
+_PROXY_SOURCES = {s.strip() for s in _PROXY_SOURCES_RAW.split(",") if s.strip()}
+_PROXY_OPENER = (
+    urllib.request.build_opener(
+        urllib.request.ProxyHandler({"http": _PROXY_URL, "https": _PROXY_URL}),
+        urllib.request.HTTPSHandler(context=_CTX),
+    )
+    if _PROXY_URL
+    else None
+)
+
 _TYPE = {
     "arxiv": "paper",
     "github_releases": "release",
@@ -30,6 +46,45 @@ _TYPE = {
 def load_source_config(path: Path) -> list[dict]:
     data = json.loads(path.read_text(encoding="utf-8"))
     return list(data.get("sources", []))
+
+
+def _resolve_zhihu_secret(spec: dict | None = None) -> str:
+    """优先从用户级 zhihu.json 读取，回退到环境变量。"""
+    env_var = str((spec or {}).get("credential_env") or "ZHIHU_ACCESS_SECRET")
+    env_val = (os.environ.get(env_var) or "").strip()
+    # 扫描 data/users/*/zhihu.json
+    try:
+        users_dir = Path("data") / "users"
+        if users_dir.exists():
+            for user_dir in users_dir.iterdir():
+                zhihu_file = user_dir / "zhihu.json"
+                if not zhihu_file.exists():
+                    continue
+                data = json.loads(zhihu_file.read_text(encoding="utf-8"))
+                val = str(data.get("secret") or "").strip()
+                if val:
+                    return val
+    except Exception:
+        pass
+    return env_val
+
+
+def _resolve_zhihu_base_url() -> str:
+    """优先从用户级 zhihu.json 读取 base_url，回退到环境变量。"""
+    try:
+        users_dir = Path("data") / "users"
+        if users_dir.exists():
+            for user_dir in users_dir.iterdir():
+                zhihu_file = user_dir / "zhihu.json"
+                if not zhihu_file.exists():
+                    continue
+                data = json.loads(zhihu_file.read_text(encoding="utf-8"))
+                val = str(data.get("base_url") or "").strip()
+                if val:
+                    return val
+    except Exception:
+        pass
+    return os.environ.get("ZHIHU_OPENAPI_BASE_URL") or "https://developer.zhihu.com"
 
 
 def fetch_all(sources: list[dict]) -> list[RawItem]:
@@ -77,7 +132,7 @@ def fetch_arxiv(spec: dict) -> list[RawItem]:
         f"search_query={query}&start=0&max_results={limit}"
         "&sortBy=submittedDate&sortOrder=descending"
     )
-    xml = _get(url)
+    xml = _get(url, spec)
     return parse_atom(xml, spec)
 
 
@@ -85,7 +140,7 @@ def fetch_github_releases(spec: dict) -> list[RawItem]:
     repo = spec["repo"]
     limit = int(spec.get("max", 4))
     url = f"https://api.github.com/repos/{repo}/releases?per_page={limit}"
-    raw = _get(url)
+    raw = _get(url, spec)
     payload = json.loads(raw)
     items: list[RawItem] = []
     for row in payload[:limit]:
@@ -107,7 +162,7 @@ def fetch_github_releases(spec: dict) -> list[RawItem]:
 
 
 def fetch_url(spec: dict) -> list[RawItem]:
-    html = _get(spec["url"])
+    html = _get(spec["url"], spec)
     title = _meta(html, r"<title[^>]*>(.*?)</title>") or spec.get("name") or spec["url"]
     desc = _meta(html, r'<meta[^>]+name=["\']description["\'][^>]+content=["\'](.*?)["\']') or ""
     if not desc:
@@ -127,7 +182,7 @@ def fetch_url(spec: dict) -> list[RawItem]:
 
 
 def fetch_rss(spec: dict) -> list[RawItem]:
-    xml = _get(spec["url"])
+    xml = _get(spec["url"], spec)
     limit = int(spec.get("max", 8))
     if "<feed" in xml[:500] or ATOM in xml[:800]:
         items = parse_atom(xml, spec)
@@ -138,12 +193,12 @@ def fetch_rss(spec: dict) -> list[RawItem]:
 
 def fetch_zhihu_open_search(spec: dict) -> list[RawItem]:
     """Use Zhihu's authorized search APIs; never scrape Zhihu or WeChat pages."""
-    secret = (os.environ.get(str(spec.get("credential_env") or "ZHIHU_ACCESS_SECRET")) or "").strip()
+    secret = _resolve_zhihu_secret(spec)
     if not secret:
         return []
     kind = str(spec.get("kind") or "zhihu_search")
     endpoint = "global_search" if kind == "global_search" else "zhihu_search"
-    base = (os.environ.get("ZHIHU_OPENAPI_BASE_URL") or "https://developer.zhihu.com").rstrip("/")
+    base = _resolve_zhihu_base_url().rstrip("/")
     limit = max(1, min(20 if kind == "global_search" else 10, int(spec.get("max") or 8)))
     searches = spec.get("searches") or [spec.get("search")]
     searches = [str(value).strip() for value in searches if str(value or "").strip()]
@@ -262,10 +317,30 @@ def parse_rss(xml: str, spec: dict) -> list[RawItem]:
     return items
 
 
-def _get(url: str) -> str:
+def _use_proxy(spec: dict) -> bool:
+    """该源是否走代理：配置了代理且（未限定源列表，或该源在列表中）"""
+    if not _PROXY_OPENER:
+        return False
+    if not _PROXY_SOURCES:
+        return True
+    return str(spec.get("id") or "") in _PROXY_SOURCES
+
+
+def _get(url: str, spec: dict | None = None) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/xml,application/json,*/*"})
-    with urllib.request.urlopen(req, timeout=TIMEOUT, context=_CTX) as resp:
-        return resp.read().decode("utf-8", errors="replace")
+    ctx = _CTX
+    if spec is not None and _use_proxy(spec):
+        with _PROXY_OPENER.open(req, timeout=TIMEOUT) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT, context=ctx) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+    except urllib.error.URLError as exc:
+        # 证书链不完整时降级为不验证
+        if hasattr(exc, 'reason') and 'CERTIFICATE_VERIFY_FAILED' in str(getattr(exc, 'reason', '')):
+            with urllib.request.urlopen(req, timeout=TIMEOUT, context=_CTX_UNSAFE) as resp:
+                return resp.read().decode("utf-8", errors="replace")
+        raise
 
 
 def _get_json(url: str, headers: dict[str, str]) -> dict:
