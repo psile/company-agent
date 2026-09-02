@@ -165,7 +165,7 @@ data/users/<user_id>/conversations/messages.json
 data/users/<user_id>/conversation_profile.json
 ```
 
-打开后先登录。可创建自己的账号，或试用 `alice / alice123`、`bob / bob123`。每个账号有一份私有 Memory。飞书 App ID / Secret 写在 **设置 → 账号与安全**，只作用于当前用户。
+打开后先登录。管理员在 **设置 → 用户管理** 创建账号；开发模式下可试用 `alice / alice123`、`bob / bob123`。每个账号有一份私有 Memory。飞书 App ID / Secret 写在 **设置 → 账号与安全**，只作用于当前用户。
 
 首页数字在尚未采集时可能是占位。点 **刷新源** 后走完整链路：采集 → 理解 → 记忆匹配 → 为你排序。
 
@@ -242,6 +242,10 @@ LLM_MODEL=deepseek-ai/DeepSeek-V4-Flash
 | `RADAR_REMIND_MINUTES` | 后台扫描到期提醒的间隔（分钟） | `1`；`0` 关闭循环（仍可按 `RADAR_REMIND_ON_START` 启动时扫一次） |
 | `RADAR_REMIND_ON_START` | 启动数秒后立刻扫一遍提醒 | 默认 `1` |
 | `MEMORYOS_ENABLED` | 尝试官方 MemoryOS | `0` |
+| `DEV_SEED` | 开发模式：自动创建 alice / bob 种子数据 | `1` 开发；`0` 生产 |
+| `ALLOW_REGISTER` | 开放注册 | `0` 默认关闭，用户由 admin 创建 |
+| `INITIAL_ADMIN_USERNAME` | 初始管理员用户名（首次启动自动创建） | `admin` |
+| `INITIAL_ADMIN_PASSWORD` | 初始管理员密码（**正式部署后必须修改**） | |
 
 `ingest` 显示 `pushed=0` 时，通常不是飞书坏了，而是没有内容达到 `RADAR_PUSH_THRESHOLD`，或该条已在 `data/pushed.json` 里记过。
 
@@ -401,8 +405,9 @@ FEISHU_SECRET=
 
 ```text
 Agent Core
-├── Conversation    radar/conversation.py + radar/agent.py
-├── Tool Registry   radar/agent_tools.py
+├── Identity         radar/identity.py（账号 / 密码 / Session / 飞书身份绑定）
+├── Conversation      radar/conversation.py + radar/agent.py
+├── Tool Registry     radar/agent_tools.py
 ├── Chat Storage    radar/conversation_store.py + radar/conversation_profile.py
 ├── Retrieve        radar/retrieve.py（按问题召回记忆）
 ├── Proactive       radar/proactive.py
@@ -422,6 +427,7 @@ Agent Core
 | 路径 | 职责 |
 |---|---|
 | `radar/ingest.py` | 采集与去重 |
+| `radar/identity.py` | 用户账号、密码、Session、外部身份绑定 |
 | `radar/intelligence.py` | 中文摘要、分类、标签 |
 | `radar/user_memory.py` | 画像、兴趣权重、项目、行为 |
 | `radar/retrieve.py` | 按当前问题召回记忆，而不是整包塞进提示词 |
@@ -451,6 +457,16 @@ Agent Core
 - **忽略**：不等于讨厌
 - **不相关**：降权，类似内容少推
 - **手动改分类**：学习你的整理习惯
+
+---
+
+## 开发者文档
+
+| 文档 | 说明 |
+|------|------|
+| [AUTH.md](radar/AUTH.md) | 认证系统：账号体系、密码安全、Admin API、user_id 隔离、飞书身份映射 |
+| [ARCHITECTURE.md](radar/ARCHITECTURE.md) | 架构文档：目录结构、核心数据流、存储模型、关键类、如何添加新功能 |
+| [FEATURES.md](radar/FEATURES.md) | 功能清单：推荐链路分工、卡片规范 |
 
 ---
 
