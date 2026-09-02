@@ -15,6 +15,9 @@ venv/
 radar/data/
 !radar/data/.gitignore
 radar/data/llm.json
+data/*
+!data/.gitignore
+data/llm.json
 *.zip
 
 # 编辑器 / 系统

@@ -1,0 +1,17 @@
+[Unit]
+Description=RadarME personalized push demo
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/radar
+Environment=PYTHONPATH=/opt/radar
+Environment=RADAR_HOST=0.0.0.0
+Environment=PORT=8765
+Environment=RADARME_DIR=/opt/RadarME
+# Environment=FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/xxx
+ExecStart=/usr/bin/python3 -m radar serve
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
