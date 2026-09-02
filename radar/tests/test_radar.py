@@ -1,13 +1,13 @@
 from pathlib import Path
 
-from radar.feishu import format_push
-from radar.ingest import parse_atom, parse_rss
+from radar.feishu import _app_message_payload, _lookup_open_id_by_mobile, _sign, format_push
+from radar.ingest import fetch_zhihu_open_search, parse_atom, parse_rss
 from radar.intelligence import understand_heuristic
 from radar.llm import parse_json_object
 from radar.models import RawItem
 from radar.pipeline import RadarService
-from radar.recommender import pick_push, rank_for_you
-from radar.store import LocalMemory
+from radar.recommender import diversify_feed, pick_push, rank_for_you
+from radar.store import ContentPool, LocalMemory, is_publishable_url
 from radar.user_memory import UserMemory
 
 
@@ -49,6 +49,122 @@ def test_parse_rss():
     items = parse_rss(RSS, spec)
     assert items[0].source_url == "https://example.com/launch"
     assert items[0].item_type == "news"
+
+
+def test_placeholder_sources_never_enter_production_pool(tmp_path, monkeypatch):
+    monkeypatch.setenv("RADAR_DEMO_CONTENT", "0")
+    pool = ContentPool(tmp_path / "pool")
+    pool.merge(
+        [
+            {"id": "fake", "source_url": "https://example.com/made-up", "title": "fake"},
+            {"id": "real", "source_url": "https://arxiv.org/abs/2608.26983", "title": "real"},
+        ]
+    )
+    assert [row["id"] for row in pool.items()] == ["real"]
+    assert not is_publishable_url("https://example.com/world-model-ad")
+
+
+def test_authorized_platform_search_keeps_only_expected_domain(monkeypatch):
+    monkeypatch.setenv("ZHIHU_ACCESS_SECRET", "test-secret")
+    monkeypatch.setattr(
+        "radar.ingest._get_json",
+        lambda *_args, **_kwargs: {
+            "Code": 0,
+            "Data": {
+                "items": [
+                    {
+                        "Title": "世界模型如何用于自动驾驶",
+                        "ContentType": "Article",
+                        "ContentID": "123",
+                        "ContentText": "真实知乎内容",
+                        "Url": "https://www.zhihu.com/question/123",
+                        "CommentCount": 15,
+                        "VoteUpCount": 128,
+                        "AuthorName": "张三",
+                        "AuthorBadgeText": "自动驾驶优秀答主",
+                        "EditTime": 1710000000,
+                        "AuthorityLevel": "2",
+                        "RankingScore": 0.98,
+                    },
+                    {"Title": "不应混入", "Url": "https://untrusted.test/post", "ContentText": "其他站点"},
+                ]
+            },
+        },
+    )
+    rows = fetch_zhihu_open_search(
+        {
+            "id": "zhihu-test",
+            "name": "知乎测试",
+            "kind": "zhihu_search",
+            "search": "自动驾驶 世界模型",
+            "allowed_hosts": ["zhihu.com"],
+            "max": 5,
+        }
+    )
+    assert len(rows) == 1
+    assert rows[0].source_url == "https://www.zhihu.com/question/123"
+    assert rows[0].summary == "真实知乎内容"
+    assert rows[0].metadata["author_name"] == "张三"
+    assert rows[0].metadata["vote_up_count"] == 128
+    assert rows[0].published_at.startswith("2024-03")
+
+
+def test_global_search_runs_multiple_queries_and_deduplicates(monkeypatch):
+    monkeypatch.setenv("ZHIHU_ACCESS_SECRET", "test-secret")
+    requested_urls = []
+
+    def fake_get_json(url, _headers):
+        requested_urls.append(url)
+        query = "自动驾驶" if "%E8%87%AA%E5%8A%A8%E9%A9%BE%E9%A9%B6" in url else "世界模型"
+        return {
+            "Code": 0,
+            "Data": {
+                "Items": [
+                    {
+                        "Title": f"{query}公众号文章",
+                        "ContentText": "真实内容摘要",
+                        "Url": f"https://mp.weixin.qq.com/s/{'shared' if query == '世界模型' else 'driving'}",
+                        "RankingScore": 0.8,
+                    },
+                    {
+                        "Title": "重复文章",
+                        "ContentText": "重复内容",
+                        "Url": "https://mp.weixin.qq.com/s/shared",
+                    },
+                ]
+            },
+        }
+
+    monkeypatch.setattr("radar.ingest._get_json", fake_get_json)
+    rows = fetch_zhihu_open_search(
+        {
+            "id": "wechat-test",
+            "name": "微信公众号测试",
+            "kind": "global_search",
+            "searches": ["自动驾驶", "世界模型"],
+            "filter": 'host=="mp.weixin.qq.com"',
+            "allowed_hosts": ["mp.weixin.qq.com"],
+            "max": 10,
+        }
+    )
+    assert len(requested_urls) == 2
+    assert all("Filter=host%3D%3D%22mp.weixin.qq.com%22" in url for url in requested_urls)
+    assert len(rows) == 2
+    assert {row.source_url for row in rows} == {
+        "https://mp.weixin.qq.com/s/driving",
+        "https://mp.weixin.qq.com/s/shared",
+    }
+    assert rows[0].metadata["search_query"] == "自动驾驶"
+
+
+def test_understanding_fallback_is_rich_enough_to_scan():
+    item = understand_heuristic(
+        RawItem("news", "Industry News", "industry", "A new AI product ships", "Launch details", "https://x/news", "2026-08-30T00:00:00Z", "news")
+    )
+    assert len(item["summary_zh"]) > 50
+    assert len(item["key_points"]) == 3
+    assert item["impact"]
+    assert item["what_to_watch"]
 
 
 def test_for_you_ranks_memory_above_funding(tmp_path: Path):
@@ -137,6 +253,34 @@ def test_already_pushed_not_selected_again():
     assert pick_push([item], ["keep-me"]) == []
 
 
+def test_push_threshold_keeps_low_relevance_quiet():
+    item = {
+        "id": "maybe-later",
+        "title": "Some adjacent AI news",
+        "score": 79,
+        "recommend": True,
+        "priority": "normal",
+        "source_url": "https://example.com/y",
+    }
+    assert pick_push([item], [], threshold=85) == []
+    assert pick_push([item], [], threshold=75)[0]["id"] == "maybe-later"
+
+
+def test_diversify_feed_reserves_industry_and_discovery():
+    rows = []
+    for index in range(12):
+        rows.append({"id": f"w{index}", "lane": "work", "source_id": "work-source", "score": 99 - index})
+    rows.extend(
+        [
+            {"id": "industry", "lane": "industry", "source_id": "news", "score": 70},
+            {"id": "discovery", "lane": "discovery", "source_id": "hn", "score": 66},
+            {"id": "personal", "lane": "personal", "source_id": "blog", "score": 65},
+        ]
+    )
+    feed = diversify_feed(rows, limit=10, work_ratio=55)
+    assert {row["lane"] for row in feed} >= {"work", "industry", "discovery", "personal"}
+
+
 def test_push_copy_has_chinese_summary_and_tags():
     text = format_push(
         {
@@ -149,10 +293,71 @@ def test_push_copy_has_chinese_summary_and_tags():
             "source_url": "https://example.com/m",
         }
     )
-    assert "总结" in text
+    assert "引入时间衰减" in text
     assert "长期记忆" in text
     assert "中文" not in text or "引入时间衰减" in text
     assert "https://example.com/m" in text
+
+
+def test_feishu_sign_matches_official_shape():
+    sign = _sign("1599360473", "demo")
+    assert sign
+    assert "\n" not in sign
+
+
+def test_feishu_app_message_payload_content_is_json_string():
+    payload = _app_message_payload("me@example.com", "你好")
+    assert payload["receive_id"] == "me@example.com"
+    assert payload["msg_type"] == "text"
+    assert payload["content"] == '{"text": "你好"}' or '"你好"' in payload["content"]
+
+
+def test_mobile_lookup_handles_empty_user_list(monkeypatch):
+    def fake_post_json(*args, **kwargs):
+        return {"ok": True, "data": {"data": {"user_list": []}}}
+
+    monkeypatch.setattr("radar.feishu._post_json", fake_post_json)
+    out = _lookup_open_id_by_mobile("token", "13800138000")
+    assert not out["ok"]
+    assert "mobile" in out["reason"]
+
+
+def test_validate_app_config_checks_credentials_and_mobile(monkeypatch):
+    monkeypatch.setattr(
+        "radar.feishu._tenant_access_token",
+        lambda app_id, app_secret: {"ok": True, "tenant_access_token": "token"},
+    )
+    monkeypatch.setattr(
+        "radar.feishu._lookup_open_id_by_mobile",
+        lambda token, mobile: {"ok": True, "open_id": "ou_test"},
+    )
+    from radar.feishu import validate_app_config
+
+    out = validate_app_config(
+        {"app_id": "cli_test", "app_secret": "secret", "receive_mobile": "13800138000"}
+    )
+    assert out["ok"] is True
+    assert out["credentials_ok"] is True
+    assert out["recipient_ok"] is True
+
+
+def test_feishu_tenant_token_is_reused(monkeypatch):
+    from radar.feishu import _tenant_access_token, reset_token_cache_for_tests
+
+    reset_token_cache_for_tests()
+    calls = []
+
+    def fake_post(*_args, **_kwargs):
+        calls.append(1)
+        return {"ok": True, "data": {"tenant_access_token": "cached-token", "expire": 7200}}
+
+    monkeypatch.setattr("radar.feishu._post_json", fake_post)
+    first = _tenant_access_token("cli_cache_test", "secret")
+    second = _tenant_access_token("cli_cache_test", "secret")
+    assert first["tenant_access_token"] == "cached-token"
+    assert second["tenant_access_token"] == "cached-token"
+    assert second["cached"] is True
+    assert len(calls) == 1
 
 
 def test_dislike_lowers_topic(tmp_path, monkeypatch):
@@ -171,3 +376,46 @@ def test_dislike_lowers_topic(tmp_path, monkeypatch):
     topics = {row["topic"]: row["weight"] for row in svc.user_memory.interests()}
     assert topics.get("融资", 1) < 0.5
     assert "融资" in svc.user_memory.behavior()["disliked_topics"]
+
+
+def test_parse_follow_and_classify():
+    from radar.workspace import classify_knowledge, parse_follow_text
+
+    rows = parse_follow_text("最近帮我重点关注 Agent Memory 和 Memory Skill")
+    topics = {row["topic"] for row in rows}
+    assert "Agent Memory" in topics
+    assert "Memory Skill" in topics
+    assert classify_knowledge({"title": "Mem0 Temporal Memory"}) == "Agent Memory"
+
+
+def test_dashboard_follow_and_feedback_note(tmp_path, monkeypatch):
+    monkeypatch.setenv("RADAR_LLM", "0")
+    svc = RadarService(data_dir=tmp_path)
+    dash = svc.dashboard()
+    assert dash["ok"]
+    assert "observe" in dash
+    assert dash["goals"]
+    out = svc.add_follow("最近帮我重点关注 Agent Memory 和 RAG")
+    assert out["ok"]
+    topics = {row["topic"] for row in svc.user_memory.interests()}
+    assert "RAG" in topics
+    item = {
+        "id": "dddddddddddd",
+        "title": "Mem0 Temporal Memory",
+        "summary": "long-term memory",
+        "source_url": "https://example.com/mem0",
+        "tags": ["Agent Memory"],
+        "item_type": "blog",
+    }
+    svc.memory.save_feeds([], [item], intel=[], for_you=[item])
+    pending = svc.dashboard()
+    assert pending["stats"]["pending_feedback"] == 1
+    assert [row["id"] for row in pending["pending_feedback"]] == ["dddddddddddd"]
+    tracked = svc.track("dddddddddddd", "useful")
+    assert "提高" in tracked["note"]
+    handled = svc.dashboard()
+    assert handled["stats"]["pending_feedback"] == 0
+    assert handled["pending_feedback"] == []
+    collected = svc.track("dddddddddddd", "collect")
+    assert "Agent Memory" in collected["note"]
+    assert collected["card"]["category"] == "Agent Memory"

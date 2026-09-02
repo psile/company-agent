@@ -27,3 +27,19 @@ Thumbs.db
 .echobot/
 logs/
 example_projects/
+
+# 临时文件与运行输出
+radar/pull_out.txt
+radar/push_out.txt
+radar/run_latest.err.log
+radar/run_latest.out.log
+radar/run_out.txt
+
+# 素材与参考项目（非项目代码）
+UI界面/
+copy/
+memU/
+*.md
+!radar/README.md
+!radar/FEATURES.md
+!README.md

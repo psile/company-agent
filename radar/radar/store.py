@@ -4,8 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import threading
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
+
+from .config import get_bool
+
+_JSON_LOCKS: dict[str, threading.Lock] = {}
+_JSON_LOCKS_GUARD = threading.Lock()
 
 
 DEFAULT_PROFILE = {
@@ -35,7 +43,7 @@ class LocalMemory:
         merged.update(profile)
         merged["work_keywords"] = _uniq(merged.get("work_keywords", []))
         merged["interest_keywords"] = _uniq(merged.get("interest_keywords", []))
-        self.profile_path.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_json(self.profile_path, merged)
         return merged
 
     def cards(self) -> list[dict[str, Any]]:
@@ -49,9 +57,22 @@ class LocalMemory:
         rows = self.cards()
         if any(row.get("source_url") == card["source_url"] for row in rows):
             return card
+        if not card.get("id"):
+            card["id"] = _item_id(card["source_url"])
         rows.insert(0, card)
-        self.cards_path.write_text(json.dumps(rows[:200], ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_json(self.cards_path, rows[:200])
         return card
+
+    def update_card(self, key: str, patch: dict[str, Any]) -> dict[str, Any] | None:
+        rows = self.cards()
+        for index, row in enumerate(rows):
+            if row.get("id") == key or row.get("source_url") == key:
+                merged = dict(row)
+                merged.update(patch)
+                rows[index] = merged
+                _write_json(self.cards_path, rows[:200])
+                return merged
+        return None
 
     def save_feeds(self, work: list[dict], personal: list[dict] | None = None, **extra: list[dict]) -> None:
         intel = extra.get("intel", work)
@@ -62,7 +83,7 @@ class LocalMemory:
             "work": intel,
             "personal": for_you,
         }
-        self.feeds_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_json(self.feeds_path, payload)
 
     def feeds(self) -> dict[str, list]:
         if not self.feeds_path.exists():
@@ -86,7 +107,7 @@ class LocalMemory:
     def add_event(self, event: dict[str, Any]) -> dict[str, Any]:
         rows = self.events()
         rows.insert(0, event)
-        self.events_path.write_text(json.dumps(rows[:300], ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_json(self.events_path, rows[:300])
         return event
 
     def events(self) -> list[dict[str, Any]]:
@@ -106,10 +127,7 @@ class LocalMemory:
         ids = self.pushed_ids()
         if item_id not in ids:
             ids.append(item_id)
-        self.pushed_path.write_text(
-            json.dumps({"ids": ids[-200:]}, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        _write_json(self.pushed_path, {"ids": ids[-200:]})
 
 
 def _read_json(path: Path, default: Any) -> Any:
@@ -121,9 +139,28 @@ def _read_json(path: Path, default: Any) -> Any:
         return default
 
 
+def _json_lock(path: Path) -> threading.Lock:
+    key = str(path)
+    with _JSON_LOCKS_GUARD:
+        lock = _JSON_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _JSON_LOCKS[key] = lock
+        return lock
+
+
 def _write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    raw = json.dumps(payload, ensure_ascii=False, indent=2)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    with _json_lock(path):
+        try:
+            tmp.write_text(raw, encoding="utf-8")
+            os.replace(tmp, path)
+        except Exception:
+            if tmp.exists():
+                tmp.unlink()
+            raise
 
 
 def _uniq(values: list) -> list[str]:
@@ -139,3 +176,64 @@ def _uniq(values: list) -> list[str]:
 
 def _item_id(url: str) -> str:
     return hashlib.sha1(url.encode("utf-8")).hexdigest()[:12]
+
+
+class ContentPool:
+    """全局候选池：采集一次，所有用户从这里取内容再各自排序。"""
+
+    def __init__(self, pool_dir: Path) -> None:
+        from .seeds import DEMO_ITEMS
+
+        self.root = pool_dir
+        self.items_path = pool_dir / "items.json"
+        self.allow_demo = get_bool("RADAR_DEMO_CONTENT", False)
+        self.rejected_ids: set[str] = set()
+        self.root.mkdir(parents=True, exist_ok=True)
+        if not self.items_path.exists():
+            _write_json(self.items_path, {"items": list(DEMO_ITEMS) if self.allow_demo else []})
+        elif not self.allow_demo:
+            raw = list(_read_json(self.items_path, {"items": []}).get("items") or [])
+            kept = [row for row in raw if is_publishable_item(row)]
+            self.rejected_ids = {str(row.get("id") or "") for row in raw if not is_publishable_item(row)}
+            if len(kept) != len(raw):
+                _write_json(self.items_path, {"items": kept})
+
+    def items(self) -> list[dict[str, Any]]:
+        rows = list(_read_json(self.items_path, {"items": []}).get("items") or [])
+        return rows if self.allow_demo else [row for row in rows if is_publishable_item(row)]
+
+    def merge(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        by_id: dict[str, dict[str, Any]] = {}
+        for row in self.items():
+            if row.get("id"):
+                by_id[str(row["id"])] = dict(row)
+        for row in rows:
+            item_id = str(row.get("id") or "")
+            if not item_id or (not self.allow_demo and not is_publishable_item(row)):
+                continue
+            by_id[item_id] = {**by_id.get(item_id, {}), **row}
+        items = list(by_id.values())
+        _write_json(self.items_path, {"items": items})
+        return items
+
+    def find(self, item_id: str) -> dict[str, Any] | None:
+        for row in self.items():
+            if row.get("id") == item_id or row.get("source_url") == item_id:
+                return row
+        return None
+
+
+PLACEHOLDER_HOSTS = {"example.com", "www.example.com", "example.org", "www.example.org", "example.net", "www.example.net"}
+
+
+def is_publishable_url(value: str) -> bool:
+    try:
+        parsed = urlparse(str(value or "").strip())
+    except ValueError:
+        return False
+    host = (parsed.hostname or "").lower()
+    return parsed.scheme in {"http", "https"} and bool(host) and host not in PLACEHOLDER_HOSTS
+
+
+def is_publishable_item(item: dict[str, Any]) -> bool:
+    return is_publishable_url(str(item.get("source_url") or ""))

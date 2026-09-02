@@ -3,54 +3,96 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>为你发现</title>
+  <title>个人工作秘书 Agent</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <div class="grain" aria-hidden="true"></div>
-  <header class="mast">
-    <div class="brand">
-      <p class="kicker">Observe · Understand · Memory · Recommend</p>
-      <h1>为你发现</h1>
-    </div>
-    <nav class="tabs" role="tablist">
-      <button class="tab is-on" data-tab="intel" type="button">情报</button>
-      <button class="tab" data-tab="for_you" type="button">为你</button>
-      <button class="tab" data-tab="memory" type="button">记忆</button>
-    </nav>
-    <div class="tools">
-      <p class="meta" id="statusLine">正在接通</p>
-      <button class="btn" id="refreshBtn" type="button">刷新源</button>
-    </div>
-  </header>
+  <div class="auth-gate" id="authGate">
+    <form class="auth-card" id="authForm">
+      <div class="brand">
+        <span class="logo" aria-hidden="true">A</span>
+        <span>个人工作秘书 Agent</span>
+      </div>
+      <h1 id="authTitle">登录</h1>
+      <p class="auth-lead" id="authLead">每个账号有一份私有 Memory。飞书 App ID / Secret 在登录后的「账号与安全」里填写。</p>
+      <div class="field" id="nameField" hidden>
+        <label>显示名</label>
+        <input id="regName" autocomplete="name" />
+      </div>
+      <div class="field">
+        <label>用户名</label>
+        <input id="authUser" autocomplete="username" required />
+      </div>
+      <div class="field">
+        <label>密码</label>
+        <input id="authPass" type="password" autocomplete="current-password" required />
+      </div>
+      <p class="auth-error" id="authError" hidden></p>
+      <button class="btn" id="authSubmit" type="submit">登录</button>
+      <p class="hint"><button class="linkish" id="authSwitch" type="button">没有账号？创建账户</button></p>
+      <p class="tiny auth-demo">试用：alice / alice123　或　bob / bob123</p>
+    </form>
+  </div>
+  <div class="app" id="appShell" hidden>
+    <header class="topbar">
+      <a class="brand" href="#/">
+        <span class="logo" aria-hidden="true">A</span>
+        <span>个人工作秘书 Agent</span>
+      </a>
+      <label class="search">
+        <input id="searchInput" type="search" placeholder="搜索知识、项目、动态或问题..." autocomplete="off" />
+        <kbd>⌘ K</kbd>
+      </label>
+      <div class="top-actions">
+        <button class="icon-btn" id="noticeBtn" type="button" aria-label="通知">
+          🔔
+          <span class="badge" id="noticeBadge">2</span>
+        </button>
+        <div class="userchip">
+          <span class="avatar" id="avatar">A</span>
+          <span id="userName">未登录</span>
+          <button class="btn-ghost" id="logoutBtn" type="button">退出</button>
+        </div>
+      </div>
+      <div class="notice-pop" id="noticePop" hidden></div>
+    </header>
 
-  <main class="stage">
-    <section class="feed" id="feedPane" aria-live="polite"></section>
-    <aside class="rail">
-      <section class="panel">
-        <h2>当前项目</h2>
-        <p class="summary" id="projectLine"></p>
-      </section>
-      <section class="panel">
-        <h2>兴趣权重</h2>
-        <p class="hint">点开、有用、收藏会升高；不相关会下降。</p>
-        <div class="chips" id="interestChips"></div>
-      </section>
-      <section class="panel">
-        <h2>负反馈</h2>
-        <div class="chips" id="dislikeChips"></div>
-      </section>
-      <section class="panel">
-        <h2>短期记忆</h2>
-        <ol class="memory" id="shortMemory"></ol>
-      </section>
-      <section class="panel" id="pushPanel" hidden>
-        <h2>飞书</h2>
-        <ul class="push-log" id="pushLog"></ul>
-      </section>
-    </aside>
-  </main>
-
+    <div class="shell">
+      <aside class="sidenav" id="sidenav">
+        <nav class="nav-main" id="mainNav">
+          <a class="nav-link is-on" href="#/"><svg viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z"/></svg>首页</a>
+          <a class="nav-link" href="#/recommend"><svg viewBox="0 0 24 24"><path d="m12 3 2.4 6.6H21l-5.2 4 2 6.4L12 16.6 6.2 20l2-6.4L3 9.6h6.6z"/></svg>为你推荐</a>
+          <a class="nav-link" href="#/follows"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2 4 4 0 0 1 7 2c0 5.6-7 10-7 10z"/></svg>我的关注</a>
+          <a class="nav-link" href="#/goals"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1"/></svg>目标管理</a>
+          <a class="nav-link" href="#/knowledge"><svg viewBox="0 0 24 24"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 0-3 3V4z"/><path d="M8 20V7"/></svg>知识库</a>
+          <a class="nav-link" href="#/skills"><svg viewBox="0 0 24 24"><path d="M4 8 12 4l8 4-8 4z"/><path d="M4 8v8l8 4 8-4V8"/><path d="M12 12v8"/></svg>办公 Skills</a>
+        </nav>
+        <nav class="nav-account" id="accountNav">
+          <a class="nav-link" href="#/profile"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 19a7 7 0 0 1 14 0"/></svg>个人中心</a>
+          <a class="nav-parent" href="#/settings/push"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3v2.2M4.7 7.2l1.9 1.1M17.4 15.7l1.9 1.1M4.7 16.8l1.9-1.1M17.4 8.3l1.9-1.1"/></svg><span>设置</span><span class="chevron" aria-hidden="true">▸</span></a>
+          <div class="nav-sub">
+            <a href="#/settings/profile">个人信息</a>
+            <a href="#/settings/security">账号与安全</a>
+            <a href="#/settings/llm">大模型</a>
+            <a href="#/settings/prefs">偏好设置</a>
+            <a href="#/settings/push">推送与通知</a>
+            <a href="#/settings/privacy">数据与隐私</a>
+            <a href="#/settings/members">成员与权限</a>
+          </div>
+        </nav>
+        <section class="engine" id="engineCard">
+          <div class="engine-head">
+            <span>记忆引擎状态</span>
+            <span class="okdot">● 正常</span>
+          </div>
+          <p>已处理信息 <b>2,847</b> 条</p>
+          <div class="bar"><span style="width:72%"></span></div>
+          <p>今日新增 42 条</p>
+        </section>
+      </aside>
+      <main class="page" id="page"></main>
+    </div>
+  </div>
   <p class="toast" id="toast" hidden></p>
   <script src="/app.js"></script>
 </body>

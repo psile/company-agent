@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from . import llm
-from .store import LocalMemory, _uniq
+from .store import LocalMemory, _uniq, _write_json
 
 
 SHORT_CAP = 10
@@ -21,8 +21,9 @@ class HierarchicalMemory:
 
     def __init__(self, data_dir: Path, local: LocalMemory) -> None:
         self.local = local
+        self.user_id = data_dir.name
         self.root = data_dir / "memoryos"
-        self.user_dir = self.root / "users" / local.profile().get("user_id", "me")
+        self.user_dir = self.root
         self.user_dir.mkdir(parents=True, exist_ok=True)
         self.short_path = self.user_dir / "short_term.json"
         self.mid_path = self.user_dir / "mid_term.json"
@@ -41,7 +42,7 @@ class HierarchicalMemory:
         short = self.short_term()
         mid = self.mid_term()
         long_term = self.long_term()
-        remote = try_memoryos_status()
+        remote = try_memoryos_status(self.user_id)
         return {
             "backend": "memoryos-local" + ("+pypi" if remote.get("ok") else ""),
             "memoryos": remote,
@@ -78,7 +79,7 @@ class HierarchicalMemory:
             self._archive_to_mid(overflow)
         if len(short) >= SHORT_CAP or (meta or {}).get("promote"):
             self._maybe_update_long_term(short)
-        remote = remember_via_memoryos(user_input, agent_response)
+        remote = remember_via_memoryos(user_input, agent_response, self.user_id)
         return {"ok": True, "short_size": len(short), "memoryos": remote}
 
     def merge_keywords(self, channel: str, keywords: list[str], intent: str = "") -> dict[str, Any]:
@@ -157,22 +158,22 @@ class HierarchicalMemory:
             return default
 
     def _write(self, path: Path, payload: Any) -> None:
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_json(path, payload)
 
 
-def try_memoryos_status() -> dict[str, Any]:
+def try_memoryos_status(user_id: str = "me") -> dict[str, Any]:
     if os.environ.get("MEMORYOS_ENABLED", "").strip() not in {"1", "true", "yes"}:
         return {"ok": False, "reason": "MEMORYOS_ENABLED not set; using local hierarchy"}
-    loaded = _load_memoryos_instance()
+    loaded = _load_memoryos_instance(user_id)
     return {"ok": bool(loaded.get("ok")), "reason": loaded.get("reason", "")}
 
 
-def remember_via_memoryos(user_input: str, agent_response: str) -> dict[str, Any]:
+def remember_via_memoryos(user_input: str, agent_response: str, user_id: str = "me") -> dict[str, Any]:
     if os.environ.get("MEMORYOS_ENABLED", "").strip() not in {"1", "true", "yes"}:
         return {"ok": False, "reason": "disabled"}
     if user_input == "__status__":
-        return _load_memoryos_instance()
-    loaded = _load_memoryos_instance()
+        return _load_memoryos_instance(user_id)
+    loaded = _load_memoryos_instance(user_id)
     if not loaded.get("ok"):
         return loaded
     try:
@@ -186,23 +187,23 @@ def remember_via_memoryos(user_input: str, agent_response: str) -> dict[str, Any
         return {"ok": False, "reason": str(exc)}
 
 
-_MEMORYOS = None
+_MEMORYOS_BY_USER: dict[str, dict[str, Any]] = {}
 
 
-def _load_memoryos_instance() -> dict[str, Any]:
-    global _MEMORYOS
-    if _MEMORYOS is not None:
-        return _MEMORYOS
+def _load_memoryos_instance(user_id: str = "me") -> dict[str, Any]:
+    uid = (user_id or "me").strip() or "me"
+    if uid in _MEMORYOS_BY_USER:
+        return _MEMORYOS_BY_USER[uid]
     root = os.environ.get("MEMORYOS_ROOT", r"D:\agent memory\code\MemoryOS\memoryos-pypi")
     if not os.path.isdir(root):
-        _MEMORYOS = {"ok": False, "reason": "MEMORYOS_ROOT missing"}
-        return _MEMORYOS
+        _MEMORYOS_BY_USER[uid] = {"ok": False, "reason": "MEMORYOS_ROOT missing"}
+        return _MEMORYOS_BY_USER[uid]
     if root not in sys.path:
         sys.path.insert(0, root)
     cfg = llm.load_llm_config()
     if not cfg.get("api_key"):
-        _MEMORYOS = {"ok": False, "reason": "LLM key missing for MemoryOS"}
-        return _MEMORYOS
+        _MEMORYOS_BY_USER[uid] = {"ok": False, "reason": "LLM key missing for MemoryOS"}
+        return _MEMORYOS_BY_USER[uid]
     try:
         from memoryos import Memoryos
 
@@ -211,17 +212,17 @@ def _load_memoryos_instance() -> dict[str, Any]:
             str(Path(__file__).resolve().parents[1] / "data" / "memoryos_pypi"),
         )
         inst = Memoryos(
-            user_id=os.environ.get("RADAR_USER_ID", "me"),
+            user_id=uid,
             openai_api_key=cfg["api_key"],
             data_storage_path=data_dir,
             openai_base_url=cfg.get("base_url") or None,
             llm_model=cfg.get("model") or "gpt-4o-mini",
         )
-        _MEMORYOS = {"ok": True, "instance": inst}
-        return _MEMORYOS
+        _MEMORYOS_BY_USER[uid] = {"ok": True, "instance": inst}
+        return _MEMORYOS_BY_USER[uid]
     except Exception as exc:
-        _MEMORYOS = {"ok": False, "reason": str(exc)}
-        return _MEMORYOS
+        _MEMORYOS_BY_USER[uid] = {"ok": False, "reason": str(exc)}
+        return _MEMORYOS_BY_USER[uid]
 
 
 def _now() -> str:

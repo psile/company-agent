@@ -47,6 +47,135 @@
       "type": "news",
       "url": "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
       "max": 5
+    },
+    {
+      "id": "techcrunch-ai",
+      "name": "TechCrunch AI",
+      "kind": "rss",
+      "type": "news",
+      "channel": "industry",
+      "url": "https://techcrunch.com/category/artificial-intelligence/feed/",
+      "max": 6
+    },
+    {
+      "id": "mit-tech-review-ai",
+      "name": "MIT Technology Review AI",
+      "kind": "rss",
+      "type": "news",
+      "channel": "industry",
+      "url": "https://www.technologyreview.com/topic/artificial-intelligence/feed/",
+      "max": 5
+    },
+    {
+      "id": "hacker-news",
+      "name": "Hacker News",
+      "kind": "rss",
+      "type": "news",
+      "channel": "discovery",
+      "url": "https://hnrss.org/frontpage.atom",
+      "max": 6
+    },
+    {
+      "id": "zhihu-autonomous-driving",
+      "name": "知乎 · 自动驾驶",
+      "kind": "zhihu_search",
+      "type": "article",
+      "channel": "work",
+      "search": "自动驾驶 世界模型 多模态大模型 VLM",
+      "allowed_hosts": ["zhihu.com"],
+      "credential_env": "ZHIHU_ACCESS_SECRET",
+      "max": 8
+    },
+    {
+      "id": "zhihu-intelligent-cockpit",
+      "name": "知乎 · 智能座舱",
+      "kind": "zhihu_search",
+      "type": "article",
+      "channel": "work",
+      "search": "智能座舱 VLM 端到端自动驾驶",
+      "allowed_hosts": ["zhihu.com"],
+      "credential_env": "ZHIHU_ACCESS_SECRET",
+      "max": 6
+    },
+    {
+      "id": "wechat-autonomous-driving",
+      "name": "微信公众号 · 自动驾驶",
+      "kind": "global_search",
+      "type": "article",
+      "channel": "work",
+      "searches": ["自动驾驶", "世界模型", "多模态大模型"],
+      "filter": "host==\"mp.weixin.qq.com\"",
+      "search_db": "all",
+      "allowed_hosts": ["mp.weixin.qq.com"],
+      "credential_env": "ZHIHU_ACCESS_SECRET",
+      "max": 12
+    },
+    {
+      "id": "wechat-intelligent-cockpit",
+      "name": "微信公众号 · 智能座舱",
+      "kind": "global_search",
+      "type": "article",
+      "channel": "work",
+      "searches": ["智能座舱", "VLM 自动驾驶", "端到端自动驾驶"],
+      "filter": "host==\"mp.weixin.qq.com\"",
+      "search_db": "all",
+      "allowed_hosts": ["mp.weixin.qq.com"],
+      "credential_env": "ZHIHU_ACCESS_SECRET",
+      "max": 12
+    },
+    {
+      "id": "qbitai",
+      "name": "量子位",
+      "kind": "rss",
+      "type": "news",
+      "channel": "industry",
+      "url": "https://www.qbitai.com/feed",
+      "max": 8
+    },
+    {
+      "id": "36kr",
+      "name": "36氪",
+      "kind": "rss",
+      "type": "news",
+      "channel": "industry",
+      "url": "https://36kr.com/feed",
+      "max": 8
+    },
+    {
+      "id": "geekpark",
+      "name": "极客公园",
+      "kind": "rss",
+      "type": "news",
+      "channel": "industry",
+      "url": "https://www.geekpark.net/rss",
+      "max": 6
+    },
+    {
+      "id": "infoq-cn",
+      "name": "InfoQ 中文站",
+      "kind": "rss",
+      "type": "news",
+      "channel": "work",
+      "url": "https://www.infoq.cn/feed",
+      "max": 6
+    },
+    {
+      "id": "solidot",
+      "name": "Solidot",
+      "kind": "rss",
+      "type": "news",
+      "channel": "discovery",
+      "url": "https://www.solidot.org/index.rss",
+      "max": 6
+    },
+    {
+      "id": "sspai",
+      "name": "少数派",
+      "kind": "rss",
+      "type": "news",
+      "channel": "discovery",
+      "url": "https://sspai.com/feed",
+      "max": 5
     }
   ]
 }
