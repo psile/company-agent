@@ -30,7 +30,7 @@
       <p class="auth-error" id="authError" hidden></p>
       <button class="btn" id="authSubmit" type="submit">登录</button>
       <p class="hint"><button class="linkish" id="authSwitch" type="button">没有账号？创建账户</button></p>
-      <p class="tiny auth-demo">试用：alice / alice123　或　bob / bob123</p>
+      <p class="tiny auth-demo" id="authDemoHint">试用：alice / alice123　或　bob / bob123</p>
     </form>
   </div>
   <div class="app" id="appShell" hidden>
@@ -73,6 +73,7 @@
           <div class="nav-sub">
             <a href="#/settings/profile">个人信息</a>
             <a href="#/settings/security">账号与安全</a>
+            <a href="#/settings/admin" id="navAdminUsers" hidden>用户管理</a>
             <a href="#/settings/llm">大模型</a>
             <a href="#/settings/prefs">偏好设置</a>
             <a href="#/settings/push">推送与通知</a>
@@ -92,6 +93,16 @@
       </aside>
       <main class="page" id="page"></main>
     </div>
+  </div>
+  <div class="modal-overlay" id="mustChangeModal" hidden>
+    <form class="modal-card" id="mustChangeForm">
+      <h2>请修改初始密码</h2>
+      <p class="muted">首次登录需要设置新密码后才能正常使用。</p>
+      <div class="field"><label>新密码</label><input id="mustChangePass" type="password" autocomplete="new-password" required minlength="6" /></div>
+      <div class="field"><label>确认密码</label><input id="mustChangePass2" type="password" autocomplete="new-password" required minlength="6" /></div>
+      <p class="auth-error" id="mustChangeError" hidden></p>
+      <button class="btn" type="submit">修改密码</button>
+    </form>
   </div>
   <p class="toast" id="toast" hidden></p>
   <script src="/app.js"></script>

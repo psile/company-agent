@@ -20,6 +20,10 @@ PBKDF2_ROUNDS = 120_000
 USERNAME_RE = re.compile(r"^[a-z][a-z0-9_]{2,31}$")
 
 
+def _new_uid() -> str:
+    return f"u_{uuid4().hex[:8]}"
+
+
 class IdentityService:
     def __init__(self, data_dir: Path) -> None:
         self.root = data_dir / "identity"
@@ -80,21 +84,18 @@ class IdentityService:
             return uid
         raise KeyError(uid)
 
-    def resolve_user(self, provider: str, external_id: str, display_name: str | None = None) -> dict[str, Any]:
+    def resolve_user(self, provider: str, external_id: str, display_name: str | None = None) -> dict[str, Any] | None:
+        """查找已绑定的内部用户。未绑定返回 None，不自动创建。"""
         provider = (provider or "").strip().lower()
         external_id = (external_id or "").strip()
         if not provider or not external_id:
-            raise ValueError("provider and external_id required")
+            return None
         for row in self.identities():
             if row.get("provider") == provider and str(row.get("external_id")) == external_id:
                 user = self.get(str(row.get("user_id")))
                 if user:
                     return _public_user(user)
-        user = self._create_user(display_name or external_id)
-        self._add_identity(user["id"], provider, external_id)
-        if provider in {"feishu", "web"}:
-            self._add_channel(user["id"], provider, external_id)
-        return _public_user(user)
+        return None
 
     def ensure_user(
         self,
@@ -103,6 +104,8 @@ class IdentityService:
         identities: list[tuple[str, str]],
         username: str | None = None,
         password: str | None = None,
+        role: str = "user",
+        email: str = "",
     ) -> dict[str, Any]:
         user = self.get(user_id)
         if not user:
@@ -110,8 +113,12 @@ class IdentityService:
                 "id": user_id,
                 "username": _normalize_username(username or user_id) or user_id,
                 "display_name": display_name,
+                "email": email,
                 "avatar_url": "",
+                "role": role,
                 "status": "active",
+                "must_change_password": False,
+                "last_login_at": "",
                 "created_at": _now(),
                 "updated_at": _now(),
             }
@@ -123,6 +130,14 @@ class IdentityService:
             patch["username"] = _normalize_username(username) or user_id
         if password and not user.get("password_hash"):
             patch["password_hash"] = hash_password(password)
+        if not user.get("role"):
+            patch["role"] = "user"
+        if not user.get("email") and email:
+            patch["email"] = email
+        if "must_change_password" not in user:
+            patch["must_change_password"] = False
+        if "last_login_at" not in user:
+            patch["last_login_at"] = ""
         if patch:
             self._patch_user(user_id, patch)
         for provider, external_id in identities:
@@ -138,7 +153,7 @@ class IdentityService:
                 self._add_channel(user_id, provider, external_id)
         return _public_user(self.get(user_id) or user)
 
-    def register(self, username: str, password: str, display_name: str = "") -> dict[str, Any]:
+    def register(self, username: str, password: str, display_name: str = "", role: str = "user", email: str = "") -> dict[str, Any]:
         username = _normalize_username(username)
         if not USERNAME_RE.match(username or ""):
             raise ValueError("用户名需 3–32 位，字母开头，只能含小写字母、数字、下划线")
@@ -150,8 +165,12 @@ class IdentityService:
             "id": username,
             "username": username,
             "display_name": (display_name or username).strip() or username,
+            "email": email,
             "avatar_url": "",
+            "role": role,
             "status": "active",
+            "must_change_password": False,
+            "last_login_at": "",
             "password_hash": hash_password(password),
             "created_at": _now(),
             "updated_at": _now(),
@@ -169,6 +188,7 @@ class IdentityService:
             raise ValueError("用户名或密码不正确")
         if user.get("status") == "disabled":
             raise ValueError("账号已停用")
+        self._patch_user(str(user["id"]), {"last_login_at": _now()})
         token = self._create_session(str(user["id"]))
         return {"ok": True, "token": token, "user": _public_user(user)}
 
@@ -205,12 +225,116 @@ class IdentityService:
         user = self.get(user_id)
         if not user:
             raise KeyError(user_id)
-        if not verify_password(old_password or "", str(user.get("password_hash") or "")):
-            raise ValueError("当前密码不正确")
+        # must_change_password 场景下跳过旧密码校验（admin 创建的初始密码）
+        if not user.get("must_change_password"):
+            if not verify_password(old_password or "", str(user.get("password_hash") or "")):
+                raise ValueError("当前密码不正确")
         if len(new_password or "") < 6:
             raise ValueError("新密码至少 6 位")
-        self._patch_user(user_id, {"password_hash": hash_password(new_password)})
+        self._patch_user(user_id, {"password_hash": hash_password(new_password), "must_change_password": False})
         return {"ok": True}
+
+    def list_users(self) -> list[dict[str, Any]]:
+        return [_public_user(row) for row in self.users() if row.get("id")]
+
+    def is_admin(self, user_id: str) -> bool:
+        user = self.get(user_id)
+        return bool(user and user.get("role") == "admin")
+
+    def create_user(
+        self,
+        username: str,
+        display_name: str,
+        password: str,
+        role: str = "user",
+        email: str = "",
+        must_change_password: bool = True,
+    ) -> dict[str, Any]:
+        username = _normalize_username(username)
+        if not USERNAME_RE.match(username or ""):
+            raise ValueError("用户名需 3–32 位，字母开头，只能含小写字母、数字、下划线")
+        if len(password or "") < 6:
+            raise ValueError("密码至少 6 位")
+        if self.find_by_username(username) or self.get(username):
+            raise ValueError("用户名已被占用")
+        uid = _new_uid()
+        user = {
+            "id": uid,
+            "username": username,
+            "display_name": (display_name or username).strip() or username,
+            "email": email,
+            "avatar_url": "",
+            "role": role if role in ("admin", "user") else "user",
+            "status": "active",
+            "must_change_password": must_change_password,
+            "last_login_at": "",
+            "password_hash": hash_password(password),
+            "created_at": _now(),
+            "updated_at": _now(),
+        }
+        rows = self.users()
+        rows.append(user)
+        _write_json(self.users_path, {"items": rows})
+        self._add_identity(uid, "web", username)
+        return _public_user(user)
+
+    def reset_password(self, user_id: str, new_password: str) -> dict[str, Any]:
+        user = self.get(user_id)
+        if not user:
+            raise KeyError(user_id)
+        if len(new_password or "") < 6:
+            raise ValueError("密码至少 6 位")
+        self._patch_user(user_id, {"password_hash": hash_password(new_password), "must_change_password": True})
+        return {"ok": True}
+
+    def disable_user(self, user_id: str) -> dict[str, Any]:
+        user = self.get(user_id)
+        if not user:
+            raise KeyError(user_id)
+        self._patch_user(user_id, {"status": "disabled"})
+        self._revoke_sessions(user_id)
+        return {"ok": True}
+
+    def enable_user(self, user_id: str) -> dict[str, Any]:
+        user = self.get(user_id)
+        if not user:
+            raise KeyError(user_id)
+        self._patch_user(user_id, {"status": "active"})
+        return {"ok": True}
+
+    def update_user(self, user_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+        user = self.get(user_id)
+        if not user:
+            raise KeyError(user_id)
+        allowed: dict[str, Any] = {}
+        for key in ("display_name", "email", "role", "avatar_url"):
+            if key in patch and patch[key] is not None:
+                val = patch[key]
+                if key == "role":
+                    val = val if val in ("admin", "user") else "user"
+                allowed[key] = val
+        if allowed:
+            self._patch_user(user_id, allowed)
+        return _public_user(self.get(user_id) or {})
+
+    def _revoke_sessions(self, user_id: str) -> None:
+        items = [row for row in self._sessions() if row.get("user_id") != user_id]
+        _write_json(self.sessions_path, {"items": items})
+
+    def ensure_initial_admin(self, username: str, password: str) -> dict[str, Any] | None:
+        """首次启动时创建管理员。已有用户则跳过。"""
+        if self.users():
+            return None
+        if not username or not password:
+            return None
+        admin = self.create_user(
+            username=username,
+            display_name="管理员",
+            password=password,
+            role="admin",
+            must_change_password=True,
+        )
+        return admin
 
     def _create_user(self, display_name: str) -> dict[str, Any]:
         user = {
@@ -320,8 +444,12 @@ def _public_user(row: dict[str, Any]) -> dict[str, Any]:
         "id": row.get("id"),
         "username": row.get("username") or row.get("id"),
         "display_name": row.get("display_name") or row.get("username") or row.get("id"),
+        "email": row.get("email") or "",
         "avatar_url": row.get("avatar_url") or "",
+        "role": row.get("role") or "user",
         "status": row.get("status") or "active",
+        "must_change_password": bool(row.get("must_change_password")),
+        "last_login_at": row.get("last_login_at") or "",
         "created_at": row.get("created_at") or "",
         "updated_at": row.get("updated_at") or "",
         "has_password": bool(row.get("password_hash")),

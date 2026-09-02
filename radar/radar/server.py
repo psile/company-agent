@@ -56,8 +56,16 @@ def make_handler(service: RadarService):
         def _user(self) -> str:
             uid = service.identity.user_id_for_session(self._session_token())
             if uid:
-                return uid
+                user = service.identity.get(uid)
+                if user and user.get("status") != "disabled":
+                    return uid
             raise PermissionError("login required")
+
+        def _admin(self) -> str:
+            uid = self._user()
+            if not service.identity.is_admin(uid):
+                raise PermissionError("admin required")
+            return uid
 
         def _dispatch(self, method: str) -> bool:
             parsed = urlparse(self.path)
@@ -65,11 +73,17 @@ def make_handler(service: RadarService):
             if not found:
                 return False
             try:
-                user_id = self._user() if found.auth == "user" else None
-                body = self._read_json() if method in {"POST", "PUT"} else {}
+                if found.auth == "admin":
+                    user_id = self._admin()
+                elif found.auth == "user":
+                    user_id = self._user()
+                else:
+                    user_id = None
+                body = self._read_json() if method in {"POST", "PUT", "PATCH"} else {}
                 found.fn(self, user_id, found.params, parsed.query, body)
-            except PermissionError:
-                self._json(401, {"error": "login required"})
+            except PermissionError as exc:
+                code = 403 if "admin" in str(exc) else 401
+                self._json(code, {"error": str(exc)})
             except ValueError as exc:
                 self._json(400, {"error": str(exc)})
             except KeyError as exc:
@@ -88,6 +102,10 @@ def make_handler(service: RadarService):
 
         def do_PUT(self) -> None:
             if not self._dispatch("PUT"):
+                self._json(404, {"error": "not found"})
+
+        def do_PATCH(self) -> None:
+            if not self._dispatch("PATCH"):
                 self._json(404, {"error": "not found"})
 
         def do_POST(self) -> None:
@@ -115,7 +133,7 @@ def make_handler(service: RadarService):
         def do_OPTIONS(self) -> None:
             self.send_response(204)
             self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Access-Control-Allow-Methods", "GET,POST,PUT,OPTIONS")
+            self.send_header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
             self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
             self.end_headers()
 
@@ -264,13 +282,23 @@ def make_handler(service: RadarService):
 
     add("POST", "/api/feishu/event", "none", feishu_event)
     add(
+        "GET",
+        "/api/auth/me",
+        "user",
+        lambda h, uid, *_: h._json(200, service.account(uid)),
+    )
+    add(
         "POST",
         "/api/auth/register",
         "none",
-        lambda h, _u, _p, _q, body: h._json(
-            200,
-            (session := service.register_account(body.get("username") or "", body.get("password") or "", body.get("display_name") or "")),
-            cookie=_session_cookie(session["token"]),
+        lambda h, _u, _p, _q, body: (
+            h._json(
+                200,
+                (session := service.register_account(body.get("username") or "", body.get("password") or "", body.get("display_name") or "")),
+                cookie=_session_cookie(session["token"]),
+            )
+            if get_bool("ALLOW_REGISTER", False)
+            else h._json(403, {"error": "注册已关闭，请联系管理员创建账号"})
         ),
     )
     add(
@@ -291,6 +319,50 @@ def make_handler(service: RadarService):
             service.logout(h._session_token()),
             h._json(200, {"ok": True}, cookie=_clear_session_cookie()),
         )[1],
+    )
+    # ── Admin User Management ──
+    add("GET", "/api/admin/users", "admin", lambda h, _uid, *_: h._json(200, {"items": service.admin_list_users()}))
+    add(
+        "POST",
+        "/api/admin/users",
+        "admin",
+        lambda h, _uid, _p, _q, body: h._json(
+            200,
+            service.admin_create_user(
+                body.get("username") or "",
+                body.get("display_name") or "",
+                body.get("password") or "",
+                role=body.get("role") or "user",
+                email=body.get("email") or "",
+            ),
+        ),
+    )
+    add(
+        "PATCH",
+        "/api/admin/users/{user_id}",
+        "admin",
+        lambda h, _uid, params, _q, body: h._json(200, service.admin_update_user(params["user_id"], body or {})),
+    )
+    add(
+        "POST",
+        "/api/admin/users/{user_id}/reset-password",
+        "admin",
+        lambda h, _uid, params, _q, body: h._json(
+            200,
+            service.admin_reset_password(params["user_id"], body.get("password") or ""),
+        ),
+    )
+    add(
+        "POST",
+        "/api/admin/users/{user_id}/disable",
+        "admin",
+        lambda h, _uid, params, *_: h._json(200, service.admin_disable_user(params["user_id"])),
+    )
+    add(
+        "POST",
+        "/api/admin/users/{user_id}/enable",
+        "admin",
+        lambda h, _uid, params, *_: h._json(200, service.admin_enable_user(params["user_id"])),
     )
     add("POST", "/api/refresh", "user", lambda h, uid, *_: h._json(200, service.refresh()))
     add("POST", "/api/feeds/work/refresh", "user", lambda h, uid, *_: h._json(200, service.refresh()))

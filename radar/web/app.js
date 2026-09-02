@@ -53,6 +53,8 @@ const state = {
   userId: "",
   token: localStorage.getItem("radar_session") || "",
   registerMode: false,
+  mustChangePassword: false,
+  currentUser: null,
   route: "/",
   recTab: "all",
   recFilter: "all",
@@ -95,6 +97,9 @@ async function api(path, options = {}) {
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && path !== "/api/me") {
     showAuth();
+  }
+  if (res.status === 403 && data.error && data.error.includes("admin")) {
+    toast("需要管理员权限");
   }
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
@@ -1642,6 +1647,7 @@ const PAGES = {
   "/settings/push": pageSettingsPush,
   "/settings/profile": pageSettingsProfile,
   "/settings/security": pageSettingsSecurity,
+  "/settings/admin": () => pageAdminUsers(),
   "/settings/llm": pageSettingsLlm,
   "/settings/zhihu": pageSettingsZhihu,
   "/settings/prefs": pageSettingsPrefs,
@@ -1690,6 +1696,9 @@ function render() {
   }
   const view = PAGES[state.route] || pageHome;
   $("page").innerHTML = view() + recommendationDetailHtml();
+  if (state.route === "/settings/admin" && !state._adminUsers) {
+    loadAdminUsers().then(() => render());
+  }
   if (state.pendingChatExample && $("chatInput")) {
     $("chatInput").value = state.pendingChatExample;
     $("chatInput").focus();
@@ -1737,6 +1746,23 @@ async function enterSession(session) {
   state.token = session.token || state.token;
   if (state.token) localStorage.setItem("radar_session", state.token);
   state.userId = (session.user && session.user.id) || state.userId;
+  state.currentUser = session.user || null;
+  state.mustChangePassword = !!(session.user && session.user.must_change_password);
+  if (state.currentUser && state.currentUser.role === "admin") {
+    $("navAdminUsers") && ($("navAdminUsers").hidden = false);
+  } else {
+    $("navAdminUsers") && ($("navAdminUsers").hidden = true);
+  }
+  // 隐藏 demo 提示（非开发模式）
+  if (!window.DEV_USER_SWITCHER) {
+    $("authDemoHint") && ($("authDemoHint").hidden = true);
+  }
+  if (state.mustChangePassword) {
+    $("appShell") && ($("appShell").hidden = false);
+    $("authGate") && ($("authGate").hidden = true);
+    $("mustChangeModal") && ($("mustChangeModal").hidden = false);
+    return;
+  }
   hideAuth();
   await load();
 }
@@ -1745,6 +1771,20 @@ async function boot() {
   try {
     const me = await api("/api/me");
     state.userId = (me.user && me.user.id) || "";
+    state.currentUser = me.user || null;
+    state.mustChangePassword = !!(me.user && me.user.must_change_password);
+    if (state.currentUser && state.currentUser.role === "admin") {
+      $("navAdminUsers") && ($("navAdminUsers").hidden = false);
+    }
+    if (!window.DEV_USER_SWITCHER) {
+      $("authDemoHint") && ($("authDemoHint").hidden = true);
+    }
+    if (state.mustChangePassword) {
+      $("appShell") && ($("appShell").hidden = false);
+      $("authGate") && ($("authGate").hidden = true);
+      $("mustChangeModal") && ($("mustChangeModal").hidden = false);
+      return;
+    }
     hideAuth();
     await load();
   } catch {
@@ -1967,10 +2007,48 @@ document.addEventListener("click", async (event) => {
   if (t.id === "logoutBtn") {
     await api("/api/auth/logout", { method: "POST", body: "{}" }).catch(() => {});
     state.token = "";
+    state.currentUser = null;
+    state._adminUsers = null;
     localStorage.removeItem("radar_session");
     showAuth();
     setAuthMode(false);
     toast("已退出");
+    return;
+  }
+  // ── Admin user management actions ──
+  if (t.id === "adminCreateBtn") {
+    $("adminCreateModal").hidden = false;
+    return;
+  }
+  if (t.id === "adminCreateCancel") {
+    $("adminCreateModal").hidden = true;
+    return;
+  }
+  if (t.id === "adminResetCancel") {
+    $("adminResetModal").hidden = true;
+    return;
+  }
+  if (t.dataset.adminDisable) {
+    await api(`/api/admin/users/${encodeURIComponent(t.dataset.adminDisable)}/disable`, { method: "POST", body: "{}" });
+    state._adminUsers = null;
+    toast("已停用");
+    await loadAdminUsers();
+    render();
+    return;
+  }
+  if (t.dataset.adminEnable) {
+    await api(`/api/admin/users/${encodeURIComponent(t.dataset.adminEnable)}/enable`, { method: "POST", body: "{}" });
+    state._adminUsers = null;
+    toast("已启用");
+    await loadAdminUsers();
+    render();
+    return;
+  }
+  if (t.dataset.adminReset) {
+    state._resetTargetId = t.dataset.adminReset;
+    const u = (state._adminUsers || []).find((row) => row.id === t.dataset.adminReset);
+    $("resetTargetName").textContent = u ? (u.display_name || u.username) : "";
+    $("adminResetModal").hidden = false;
     return;
   }
   if (t.id === "newProjectBtn") {
@@ -2524,6 +2602,151 @@ $("authForm")?.addEventListener("submit", async (event) => {
   }
 });
 
-syncRouteState();
+// ── Must change password modal ──
+$("mustChangeForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const p1 = $("mustChangePass").value;
+  const p2 = $("mustChangePass2").value;
+  const err = $("mustChangeError");
+  err.hidden = true;
+  if (p1 !== p2) {
+    err.textContent = "两次输入不一致";
+    err.hidden = false;
+    return;
+  }
+  if (p1.length < 6) {
+    err.textContent = "密码至少 6 位";
+    err.hidden = false;
+    return;
+  }
+  try {
+    // 用当前 token 对应的旧密码不校验，直接走 admin reset（首次改密场景）
+    // 普通用户改密码走 /api/account/password（需要 old_password）
+    // must_change_password 场景下用自身身份改密码
+    await api("/api/account/password", {
+      method: "PUT",
+      body: JSON.stringify({ old_password: "", new_password: p1 }),
+    }).catch(async () => {
+      // 如果旧密码校验失败，说明没有老密码（admin 创建的），尝试用 admin reset-password 自助
+      // 这种情况只在 must_change_password=true 时发生
+      throw new Error("无法修改密码，请联系管理员");
+    });
+    state.mustChangePassword = false;
+    $("mustChangeModal").hidden = true;
+    toast("密码已修改，欢迎使用！");
+    await load();
+  } catch (e) {
+    err.textContent = e.message || "修改失败";
+    err.hidden = false;
+  }
+});
+
+// ── Admin create user form ──
+$("adminCreateForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const err = $("adminCreateError");
+  err.hidden = true;
+  try {
+    await api("/api/admin/users", {
+      method: "POST",
+      body: JSON.stringify({
+        username: $("newUsername").value.trim(),
+        display_name: $("newDisplayName").value.trim(),
+        email: $("newEmail").value.trim(),
+        password: $("newPassword").value,
+      }),
+    });
+    $("adminCreateModal").hidden = true;
+    state._adminUsers = null;
+    toast("用户已创建");
+    await loadAdminUsers();
+    render();
+  } catch (e) {
+    err.textContent = e.message || "创建失败";
+    err.hidden = false;
+  }
+});
+
+// ── Admin reset password form ──
+$("adminResetForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const err = $("adminResetError");
+  err.hidden = true;
+  try {
+    await api(`/api/admin/users/${encodeURIComponent(state._resetTargetId)}/reset-password`, {
+      method: "POST",
+      body: JSON.stringify({ password: $("resetPassword").value }),
+    });
+    $("adminResetModal").hidden = true;
+    toast("密码已重置");
+  } catch (e) {
+    err.textContent = e.message || "重置失败";
+    err.hidden = false;
+  }
+});
+
+// ── Admin user management page ──
+function pageAdminUsers() {
+  const users = state._adminUsers || [];
+  const rows = users.map((u) => {
+    const status = u.status === "disabled" ? '<span class="tag tag-off">已停用</span>' : '<span class="tag tag-on">正常</span>';
+    const role = u.role === "admin" ? '<span class="tag">管理员</span>' : "";
+    const actions = u.status === "disabled"
+      ? `<button class="btn-ghost" data-admin-enable="${u.id}">启用</button>`
+      : `<button class="btn-ghost" data-admin-disable="${u.id}">停用</button>`;
+    return `<tr>
+      <td>${escapeHtml(u.display_name || u.username)}</td>
+      <td>${escapeHtml(u.username)}</td>
+      <td>${role}</td>
+      <td>${status}</td>
+      <td>${fmtTime(u.last_login_at) || "—"}</td>
+      <td>${fmtTime(u.created_at) || "—"}</td>
+      <td>${actions} <button class="btn-ghost" data-admin-reset="${u.id}">重置密码</button></td>
+    </tr>`;
+  }).join("");
+  return `
+    <div class="card">
+      <div class="card-head">
+        <h2>用户管理</h2>
+        <button class="btn" id="adminCreateBtn">创建用户</button>
+      </div>
+      <table class="data-table">
+        <thead><tr><th>姓名</th><th>账号</th><th>角色</th><th>状态</th><th>最近登录</th><th>创建时间</th><th>操作</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div class="modal-overlay" id="adminCreateModal" hidden>
+      <form class="modal-card" id="adminCreateForm">
+        <h2>创建用户</h2>
+        <div class="field"><label>账号</label><input id="newUsername" required pattern="[a-z][a-z0-9_]{2,31}" /></div>
+        <div class="field"><label>姓名</label><input id="newDisplayName" /></div>
+        <div class="field"><label>邮箱（可选）</label><input id="newEmail" type="email" /></div>
+        <div class="field"><label>初始密码</label><input id="newPassword" type="password" required minlength="6" /></div>
+        <p class="auth-error" id="adminCreateError" hidden></p>
+        <button class="btn" type="submit">创建</button>
+        <button class="btn-ghost" type="button" id="adminCreateCancel">取消</button>
+      </form>
+    </div>
+    <div class="modal-overlay" id="adminResetModal" hidden>
+      <form class="modal-card" id="adminResetForm">
+        <h2>重置密码</h2>
+        <p class="muted">为 <b id="resetTargetName"></b> 设置新密码，用户下次登录需修改。</p>
+        <div class="field"><label>新密码</label><input id="resetPassword" type="password" required minlength="6" /></div>
+        <p class="auth-error" id="adminResetError" hidden></p>
+        <button class="btn" type="submit">重置</button>
+        <button class="btn-ghost" type="button" id="adminResetCancel">取消</button>
+      </form>
+    </div>
+  `;
+}
+
+async function loadAdminUsers() {
+  try {
+    const res = await api("/api/admin/users");
+    state._adminUsers = res.items || [];
+  } catch {
+    state._adminUsers = [];
+  }
+}
 state.route = currentRoute();
 boot();

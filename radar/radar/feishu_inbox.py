@@ -239,8 +239,11 @@ def resolve_inbox_user(service: Any, open_id: str, profile: dict[str, Any] | Non
         _bind_open_id(service, unique, oid)
         return unique
 
-    user = service.identity.resolve_user("feishu", oid, display_name=name or oid)
-    return str(user.get("id") or "") or None
+    # 不自动创建用户——未绑定的飞书消息会被丢弃
+    resolved = service.identity.resolve_user("feishu", oid, display_name=name or oid)
+    if resolved:
+        return str(resolved.get("id") or "") or None
+    return None
 
 
 def push_inbox_text(service: Any, user_id: str, text: str) -> dict[str, Any]:

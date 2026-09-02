@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -72,6 +73,12 @@ class RadarService:
     def _ensure_demo(self) -> None:
         from .seeds import DEMO_PASSWORDS, DEMO_USERS, bootstrap_core_data
 
+        if not get_bool("DEV_SEED", True):
+            admin_user = os.environ.get("INITIAL_ADMIN_USERNAME", "")
+            admin_pass = os.environ.get("INITIAL_ADMIN_PASSWORD", "")
+            self.identity.ensure_initial_admin(admin_user, admin_pass)
+            return
+
         for spec in DEMO_USERS:
             self.identity.ensure_user(
                 spec["id"],
@@ -79,6 +86,7 @@ class RadarService:
                 spec["identities"],
                 username=spec["id"],
                 password=DEMO_PASSWORDS.get(spec["id"]),
+                role="user",
             )
             user_root = self.root / "users" / spec["id"]
             bootstrap_user_dir(user_root, spec)
@@ -88,6 +96,17 @@ class RadarService:
                 self.work_events_service,
                 user_root,
                 spec["id"],
+            )
+
+        admin_user = os.environ.get("INITIAL_ADMIN_USERNAME", "")
+        admin_pass = os.environ.get("INITIAL_ADMIN_PASSWORD", "")
+        if admin_user and admin_pass and not self.identity.find_by_username(admin_user):
+            self.identity.create_user(
+                username=admin_user,
+                display_name="管理员",
+                password=admin_pass,
+                role="admin",
+                must_change_password=True,
             )
 
     def for_user(self, user_id: str | None = None) -> UserScope:
@@ -154,6 +173,35 @@ class RadarService:
         self._scope(uid)
         session = self.identity.login(username, password)
         return session
+
+    def admin_create_user(
+        self,
+        username: str,
+        display_name: str,
+        password: str,
+        role: str = "user",
+        email: str = "",
+    ) -> dict:
+        user = self.identity.create_user(username, display_name, password, role=role, email=email)
+        uid = str(user["id"])
+        bootstrap_new_user(self.root / "users" / uid, uid, str(user.get("display_name") or uid))
+        self._scope(uid)
+        return user
+
+    def admin_list_users(self) -> list[dict]:
+        return self.identity.list_users()
+
+    def admin_reset_password(self, user_id: str, new_password: str) -> dict:
+        return self.identity.reset_password(user_id, new_password)
+
+    def admin_disable_user(self, user_id: str) -> dict:
+        return self.identity.disable_user(user_id)
+
+    def admin_enable_user(self, user_id: str) -> dict:
+        return self.identity.enable_user(user_id)
+
+    def admin_update_user(self, user_id: str, patch: dict) -> dict:
+        return self.identity.update_user(user_id, patch)
 
     def login(self, username: str, password: str) -> dict:
         return self.identity.login(username, password)
