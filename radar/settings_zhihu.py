@@ -59,9 +59,16 @@ def test_zhihu_connection(user_id: str) -> dict[str, Any]:
     if not secret:
         return {"ok": False, "reason": "请先填写知乎 Secret"}
     try:
+        import time as _time
+
         params = urllib.parse.urlencode({"Query": "测试", "Count": 1})
         url = f"{base_url}/api/v1/content/global_search?{params}"
-        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {secret}", "User-Agent": "RadarME-secretary-demo/0.1"})
+        req = urllib.request.Request(url, headers={
+            "Authorization": f"Bearer {secret}",
+            "X-Request-Timestamp": str(int(_time.time())),
+            "Accept": "application/json",
+            "User-Agent": "RadarME-secretary-demo/0.1",
+        })
         with urllib.request.urlopen(req, timeout=8) as resp:
             data = json.loads(resp.read())
             code = data.get("Code", data.get("code", 0))
