@@ -201,20 +201,30 @@ def _guess_tags(blob: str, item_type: str) -> list[str]:
     return list(dict.fromkeys(tags))[:5] or ["技术动态"]
 
 
+
+def _clip_summary(text: str, limit: int) -> str:
+    """截断到句子边界，避免摘要戛然而止。"""
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    for stop in ("。", "；", "; ", ". ", "，", " "):
+        pos = cut.rfind(stop)
+        if pos > limit * 0.5:
+            return cut[: pos + 1]
+    return cut
+
 def _zh_fallback(item: RawItem) -> str:
+    text = (item.summary or "").strip()
     if item.item_type == "release":
         base = f"{item.source_name} 发布了新版本《{item.title}》。"
-        text = (item.summary or "").strip()
-        return f"{base}更新内容：{text[:140]}" if text else base
+        return f"{base}更新内容：{_clip_summary(text, 140)}" if text else base
     if item.item_type == "paper":
-        text = (item.summary or "").strip()
-        return f"论文《{item.title}》研究内容：{text[:160]}" if text else f"论文《{item.title}》为最新研究，详细摘要待补充。"
+        return f"论文《{item.title}》研究内容：{_clip_summary(text, 200)}" if text else f"论文《{item.title}》为最新研究，详细摘要待补充。"
     if item.item_type == "news":
         base = f"{item.source_name} 报道了《{item.title}》。"
-        text = (item.summary or "").strip()
-        return f"{base}内容：{text[:160]}" if text else base
-    text = (item.summary or item.title or "").strip()
-    return f"{item.source_name} 更新了《{item.title}》。核心内容：{text[:140]}"
+        return f"{base}内容：{_clip_summary(text, 160)}" if text else base
+    return f"{item.source_name} 更新了《{item.title}》。核心内容：{_clip_summary(text, 160)}"
 
 
 def _fallback_points(item: RawItem) -> list[str]:

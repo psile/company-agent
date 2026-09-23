@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import html
 import json
 import os
+import re
 import ssl
 import time
 import urllib.error
@@ -420,7 +422,10 @@ def _text(node: ET.Element, tag: str) -> str:
 
 
 def _clean(text: str) -> str:
-    return " ".join((text or "").split())
+    # 去除采集摘要中夹带的 HTML 标签/实体（国内源常返回富文本片段）
+    cleaned = re.sub(r"<[^>]+>", " ", text or "")
+    cleaned = html.unescape(cleaned)
+    return " ".join(cleaned.split())
 
 
 def _item_type(spec: dict) -> str:
