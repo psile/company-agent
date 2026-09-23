@@ -46,3 +46,6 @@ memU/
 !radar/README.md
 !radar/FEATURES.md
 !README.md
+.spec/
+.pytest_cache/
+*.log
