@@ -22,7 +22,7 @@ UNDERSTAND_SYSTEM = (
 
 def understand_all(raw: list[RawItem]) -> list[dict[str, Any]]:
     base = [understand_heuristic(item) for item in raw]
-    overlay = _llm_understand(base[:12])
+    overlay = _llm_understand(base[:6])
     by_id = {row["id"]: row for row in overlay}
     out = []
     for row in base:
@@ -146,7 +146,7 @@ def _llm_understand(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             '"content_type":"research|release|blog|news"}]}\n'
             f"条目：{compact}"
         ),
-        timeout=28,
+        timeout=120,
     )
     if not parsed:
         return []
