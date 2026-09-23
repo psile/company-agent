@@ -464,7 +464,7 @@ function goalMini(label, goal) {
 }
 
 function emptyFeed() {
-  return `<div class="empty">还没有筛出内容。点「刷新源」，Agent 会走采集 → 理解 → 记忆匹配 → 为你排序。</div>`;
+  return `<div class="empty">还没有筛出内容。回到「首页」点「刷新源」，Agent 会走采集 → 理解 → 记忆匹配 → 为你排序。</div>`;
 }
 
 // Task Card 组件（复用现有风格）
@@ -559,6 +559,7 @@ function pageRecommend() {
         <h1>${state.recTab === "feedback" ? "待处理反馈" : "为你推荐"}</h1>
         <p>${state.recTab === "feedback" ? "告诉 Agent 哪些内容有用、值得收藏或不再需要，让后续推荐更准确。" : `本轮为你筛选 ${items.length} 条，先看简报，感兴趣再展开详情。`}</p>
       </div>
+      <div class="actions"><button class="btn" id="refreshBtn2" type="button">刷新源</button></div>
     </div>
     <div class="tabs">
       <button class="tab${state.recTab === "all" ? " is-on" : ""}" data-rectab="all" type="button">全部推荐 ${dash.for_you?.length || 0}</button>
