@@ -90,11 +90,8 @@ class IdentityService:
                 user = self.get(str(row.get("user_id")))
                 if user:
                     return _public_user(user)
-        user = self._create_user(display_name or external_id)
-        self._add_identity(user["id"], provider, external_id)
-        if provider in {"feishu", "web"}:
-            self._add_channel(user["id"], provider, external_id)
-        return _public_user(user)
+        # 未绑定的外部身份不自动创建用户（安全：需 admin 先建账号并绑定）
+        return None
 
     def ensure_user(
         self,
@@ -169,6 +166,7 @@ class IdentityService:
             raise ValueError("用户名或密码不正确")
         if user.get("status") == "disabled":
             raise ValueError("账号已停用")
+        self._patch_user(str(user["id"]), {"last_login_at": _now()})
         token = self._create_session(str(user["id"]))
         return {"ok": True, "token": token, "user": _public_user(user)}
 
@@ -201,31 +199,69 @@ class IdentityService:
             return found
         return None
 
-    def change_password(self, user_id: str, old_password: str, new_password: str) -> dict[str, Any]:
-        user = self.get(user_id)
-        if not user:
-            raise KeyError(user_id)
-        if not verify_password(old_password or "", str(user.get("password_hash") or "")):
-            raise ValueError("当前密码不正确")
-        if len(new_password or "") < 6:
-            raise ValueError("新密码至少 6 位")
-        self._patch_user(user_id, {"password_hash": hash_password(new_password)})
-        return {"ok": True}
-
-    def _create_user(self, display_name: str) -> dict[str, Any]:
+    def create_user(
+        self,
+        username: str,
+        display_name: str = "",
+        password: str = "",
+        role: str = "user",
+        email: str = "",
+    ) -> dict[str, Any]:
+        username = _normalize_username(username)
+        if not USERNAME_RE.match(username or ""):
+            raise ValueError("用户名需 3–32 位，字母开头，只能含小写字母、数字、下划线")
+        if len(password or "") < 6:
+            raise ValueError("密码至少 6 位")
+        if self.find_by_username(username) or self.get(username):
+            raise ValueError("用户名已被占用")
         user = {
-            "id": f"user_{uuid4().hex[:8]}",
-            "username": "",
-            "display_name": display_name,
+            "id": f"u_{uuid4().hex[:8]}",
+            "username": username,
+            "display_name": (display_name or "").strip() or username,
+            "email": (email or "").strip(),
             "avatar_url": "",
             "status": "active",
+            "role": role,
+            "must_change_password": True,
+            "password_hash": hash_password(password),
             "created_at": _now(),
             "updated_at": _now(),
+            "last_login_at": "",
         }
         rows = self.users()
         rows.append(user)
         _write_json(self.users_path, {"items": rows})
         return user
+
+    def disable_user(self, user_id: str) -> None:
+        self._patch_user(user_id, {"status": "disabled"})
+        # 撤销该用户全部 session
+        items = [row for row in self._sessions() if row.get("user_id") != user_id]
+        _write_json(self.sessions_path, {"items": items})
+
+    def enable_user(self, user_id: str) -> None:
+        self._patch_user(user_id, {"status": "active"})
+
+    def is_admin(self, user_id: str) -> bool:
+        user = self.get(user_id)
+        return bool(user and user.get("role") == "admin")
+
+    def change_password(self, user_id: str, old_password: str, new_password: str) -> dict[str, Any]:
+        user = self.get(user_id)
+        if not user:
+            raise KeyError(user_id)
+        if len(new_password or "") < 6:
+            raise ValueError("新密码至少 6 位")
+        # 首次登录强制改密时（must_change_password）跳过旧密码校验
+        if not user.get("must_change_password") and not verify_password(
+            old_password or "", str(user.get("password_hash") or "")
+        ):
+            raise ValueError("当前密码不正确")
+        self._patch_user(
+            user_id,
+            {"password_hash": hash_password(new_password), "must_change_password": False},
+        )
+        return {"ok": True}
 
     def _patch_user(self, user_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         rows = self.users()
@@ -320,8 +356,12 @@ def _public_user(row: dict[str, Any]) -> dict[str, Any]:
         "id": row.get("id"),
         "username": row.get("username") or row.get("id"),
         "display_name": row.get("display_name") or row.get("username") or row.get("id"),
+        "email": row.get("email") or "",
         "avatar_url": row.get("avatar_url") or "",
         "status": row.get("status") or "active",
+        "role": row.get("role") or "user",
+        "must_change_password": bool(row.get("must_change_password")),
+        "last_login_at": row.get("last_login_at") or "",
         "created_at": row.get("created_at") or "",
         "updated_at": row.get("updated_at") or "",
         "has_password": bool(row.get("password_hash")),

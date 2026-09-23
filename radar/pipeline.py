@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,7 +14,7 @@ from .channels import send_for_user
 from .config import get_bool, get_int, get_str, load_env
 from .conversation import ConversationService
 from .feishu import format_push, validate_app_config
-from .identity import IdentityService
+from .identity import IdentityService, hash_password
 from .memory_bridge import remember_fact
 from .memory_os import HierarchicalMemory
 from .notify import NotificationLog
@@ -49,6 +51,7 @@ class RadarService:
         from . import llm
 
         llm.set_data_dir(self.root)
+        self._seed_demo = os.environ.get("DEV_SEED", "1") != "0"
         self.identity = IdentityService(self.root)
         # 初始化核心服务层（数据存到 users/ 下）
         from .core.services import TaskService, WorkEventService, WorkNoteService, ReminderService
@@ -57,7 +60,9 @@ class RadarService:
         self.work_events_service = WorkEventService(self.root / "users")
         self.work_notes_service = WorkNoteService(self.root / "users")
         self.reminders_service = ReminderService(self.root / "users")
-        self._ensure_demo()
+        if self._seed_demo:
+            self._ensure_demo()
+        self._ensure_admin()  # 无 admin 时始终创建（演示账号无 admin 角色）
         self.pool = ContentPool(self.root / "pool")
         self._purge_placeholder_content(self.pool.rejected_ids)
         self.observe_path = self.root / "pool" / "observe.json"
@@ -89,6 +94,52 @@ class RadarService:
                 user_root,
                 spec["id"],
             )
+
+    def _ensure_admin(self) -> None:
+        """首次启动且无 admin 时创建初始 admin（INITIAL_ADMIN_USERNAME/PASSWORD）。"""
+        if any(row.get("role") == "admin" for row in self.identity.users()):
+            return
+        username = os.environ.get("INITIAL_ADMIN_USERNAME", "admin")
+        password = os.environ.get("INITIAL_ADMIN_PASSWORD", "")
+        if not password:
+            import secrets
+
+            password = secrets.token_urlsafe(12)
+            print(f"[radar] generated admin password: {password} (shown once, please change it)")
+        self.identity.create_user(username, "管理员", password, role="admin")
+        print(f"[radar] initial admin created: {username}")
+
+    # ── Admin 用户管理 ──
+
+    def admin_create_user(self, username: str, display_name: str, password: str, email: str = "") -> dict[str, Any]:
+        from .identity import _public_user
+
+        user = self.identity.create_user(username, display_name, password, role="user", email=email)
+        self._scope(str(user["id"]))  # 初始化用户目录
+        return _public_user(user)
+
+    def admin_reset_password(self, user_id: str, new_password: str) -> dict[str, Any]:
+        user = self.identity.get(user_id)
+        if not user:
+            raise KeyError(user_id)
+        if len(new_password or "") < 6:
+            raise ValueError("密码至少 6 位")
+        self.identity._patch_user(
+            user_id,
+            {
+                "password_hash": hash_password(new_password),
+                "must_change_password": True,
+            },
+        )
+        return {"ok": True}
+
+    def admin_disable_user(self, user_id: str) -> dict[str, Any]:
+        self.identity.disable_user(user_id)
+        return {"ok": True}
+
+    def admin_enable_user(self, user_id: str) -> dict[str, Any]:
+        self.identity.enable_user(user_id)
+        return {"ok": True}
 
     def for_user(self, user_id: str | None = None) -> UserScope:
         return self._scope(user_id)

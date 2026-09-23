@@ -22,16 +22,17 @@ def _patch_task_date(svc: RadarService, task_id: str, user_id: str, completed_at
 
 def test_daily_ordering_desc(tmp_path, monkeypatch):
     svc = _svc(tmp_path, monkeypatch)
+    today = datetime.now()
     for offset, title in ((3, "三天前任务"), (1, "昨天任务"), (0, "今天任务")):
         task = svc.create_task({"title": title}, user_id="alice")
-        stamp = datetime(2026, 8, 30, 10, 0, tzinfo=None) - timedelta(days=offset)
+        stamp = today - timedelta(days=offset)
         _patch_task_date(svc, task["id"], "alice", stamp.isoformat() + "+08:00")
         svc.update_task(task["id"], {"status": "done"}, user_id="alice")
         _patch_task_date(svc, task["id"], "alice", stamp.isoformat() + "+08:00")
     summary = svc.work_summary("alice", range_days=7)
     dates = [day["date"] for day in summary["days"]]
     assert dates == sorted(dates, reverse=True)
-    assert "2026-08-30" in dates and "2026-08-27" in dates
+    assert today.strftime("%Y-%m-%d") in dates and (today - timedelta(days=3)).strftime("%Y-%m-%d") in dates
 
 
 def test_user_isolation(tmp_path, monkeypatch):

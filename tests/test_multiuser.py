@@ -56,8 +56,6 @@ def test_feishu_open_id_maps_to_two_users(tmp_path, monkeypatch):
     svc = _svc(tmp_path, monkeypatch)
     assert svc.identity.resolve_user("feishu", "ou_alice")["id"] == "alice"
     assert svc.identity.resolve_user("feishu", "ou_bob")["id"] == "bob"
-    user_a = svc.identity.resolve_user("feishu", "ou_A", "User A")
-    user_b = svc.identity.resolve_user("feishu", "ou_B", "User B")
-    assert user_a["id"] != user_b["id"]
-    assert user_a["id"] not in {"alice", "bob"} or user_b["id"] != user_a["id"]
-    assert svc.identity.resolve_user("feishu", "ou_A")["id"] == user_a["id"]
+    # 未绑定的 open_id 不自动创建用户（安全契约，见 radar/tests/test_admin_auth.py）
+    assert svc.identity.resolve_user("feishu", "ou_unknown", "User X") is None
+    assert svc.identity.resolve_user("feishu", "ou_other", "User Y") is None
