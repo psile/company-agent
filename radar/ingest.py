@@ -283,7 +283,7 @@ def parse_atom(xml: str, spec: dict) -> list[RawItem]:
                 source_name=spec.get("name", spec["id"]),
                 channel=spec.get("channel", "work"),
                 title=_clean(title),
-                summary=_clean(summary)[:280],
+                summary=_clean(summary)[:900],
                 source_url=link,
                 published_at=published,
                 item_type=_item_type(spec),

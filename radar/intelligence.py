@@ -12,6 +12,9 @@ UNDERSTAND_SYSTEM = (
     "你是个人工作秘书的情报编辑，只做结构化理解，不做推荐。"
     "summary、key_points、impact、what_to_watch 和 innovation 必须用自然、具体的中文。"
     "不要只改写标题，要说清发生了什么、重要细节、可能产生的影响。"
+    "禁止输出对读者的指导或建议（例如'建议先看…''值得核对…''判断能否迁移'这类措辞），"
+    "必须直接陈述内容本身：论文/发布/新闻研究了什么、用了什么方法、得到什么结论。"
+    "key_points 应是内容的事实要点（如：提出X方法、在Y基准上提升Z），而不是让读者去做的事。"
     "tags 用中文短词（2–6字），方便用户扫一眼判断感不感兴趣。"
     "只返回 JSON。"
 )
@@ -125,7 +128,7 @@ def _llm_understand(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         {
             "id": row["id"],
             "title": row["title"],
-            "summary": (row.get("summary") or "")[:320],
+            "summary": (row.get("summary") or "")[:900],
             "type": row.get("item_type"),
             "source": row.get("source_name"),
         }
@@ -200,37 +203,48 @@ def _guess_tags(blob: str, item_type: str) -> list[str]:
 
 def _zh_fallback(item: RawItem) -> str:
     if item.item_type == "release":
-        return f"{item.source_name} 发布了新版本《{item.title}》。本次更新值得重点核对新增能力、兼容性变化和升级成本，再决定是否进入当前技术方案。"
+        base = f"{item.source_name} 发布了新版本《{item.title}》。"
+        text = (item.summary or "").strip()
+        return f"{base}更新内容：{text[:140]}" if text else base
     if item.item_type == "paper":
-        return f"这篇论文围绕《{item.title}》展开研究。建议先看它解决的问题、核心方法和实验结论，再判断是否能转化为当前项目的设计依据。"
+        text = (item.summary or "").strip()
+        return f"论文《{item.title}》研究内容：{text[:160]}" if text else f"论文《{item.title}》为最新研究，详细摘要待补充。"
     if item.item_type == "news":
-        return f"{item.source_name} 报道了《{item.title}》。这条内容适合用来了解近期行业变化、参与者动向及其可能带来的产品或市场影响。"
+        base = f"{item.source_name} 报道了《{item.title}》。"
+        text = (item.summary or "").strip()
+        return f"{base}内容：{text[:160]}" if text else base
     text = (item.summary or item.title or "").strip()
-    return f"{item.source_name} 更新了《{item.title}》。核心内容涉及：{text[:140]}"
+    return f"{item.source_name} 更新了《{item.title}》。核心内容：{text[:140]}"
 
 
 def _fallback_points(item: RawItem) -> list[str]:
+    text = (item.summary or "").strip()
     if item.item_type == "paper":
-        return ["明确论文试图解决的核心问题", "核对方法与对比实验是否充分", "判断结论能否迁移到当前项目"]
-    if item.item_type == "release":
-        return ["确认新增能力和行为变化", "检查兼容性、依赖与升级成本", "评估是否值得进入现有工作流"]
-    return ["了解事件本身和关键参与者", "判断变化对行业或产品的影响", "关注后续进展和实际落地"]
+        points = [f"研究主题：{text[:70]}"] if text else []
+    elif item.item_type == "release":
+        points = [f"版本要点：{text[:70]}"] if text else []
+    else:
+        points = [f"事件内容：{text[:70]}"] if text else []
+    points.append(f"来源：{item.source_name}")
+    if item.source_url:
+        points.append(f"原文：{item.source_url}")
+    return points
 
 
 def _fallback_impact(item: RawItem) -> str:
     if item.item_type == "news":
-        return "它可能改变行业判断、产品节奏或竞争格局，值得和近期同类动态一起看。"
+        return "该动态可能影响行业判断、产品节奏或竞争格局。"
     if item.item_type == "paper":
-        return "如果实验结论可靠，可作为方案设计、技术选型或后续验证的参考。"
-    return "可能影响现有工具链、技术选型和近期工作安排。"
+        return "研究结论可作为方案设计与技术选型的参考依据。"
+    return "可能影响现有工具链或近期工作安排。"
 
 
 def _fallback_watch(item: RawItem) -> str:
     if item.item_type == "release":
-        return "关注真实用户反馈、已知问题以及下一个补丁版本。"
+        return "关注该版本的已知问题与后续补丁。"
     if item.item_type == "paper":
-        return "关注代码与数据是否开放，以及后续复现结果。"
-    return "关注后续官方回应、产品落地和同类参与者的动作。"
+        return "关注后续复现结果与社区讨论。"
+    return "关注后续官方回应与同类产品动向。"
 
 
 def _clip(value: Any, default: float) -> float:
